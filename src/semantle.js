@@ -39,3 +39,10 @@ export async function score(word, secret) {
   if (!s) return null;
   return { score: s.initialSimilarity, rank: s.percentile ?? null };
 }
+
+/** Semantle's 999 nearest words to the secret, as word -> rank (999 = closest). */
+export async function nearest(secret) {
+  const t = await get(`/semantle/top1000/${encodeURIComponent(secret)}/en`);
+  if (!t?.data?.length) throw new Error(`no top1000 for ${secret}`);
+  return new Map(t.data.map((d) => [d.neighbor, d.percentile]));
+}

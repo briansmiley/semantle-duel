@@ -4,6 +4,7 @@
 
 const COUNTDOWN_MS = 3000;
 export const MAX_PLAYERS = 4;
+const ABANDON_MS = 24 * 3600_000; // a started duel with no moves this long ends
 
 /** @typedef {{n:number, word:string, score:number, rank:number|null, at:number}} Guess */
 /** @typedef {{at:number, found:boolean}} Finish */
@@ -30,6 +31,16 @@ export class Duel {
   /** When the last player finished. */
   endedAt() {
     return Math.max(...[...this.players.values()].map((p) => p.finish?.at ?? Infinity));
+  }
+
+  /** End an abandoned duel: anyone still playing gives up as of the last move. Returns true if it did. */
+  expire(now) {
+    if (this.status(now) !== "playing") return false;
+    const ps = [...this.players.values()];
+    const last = Math.max(this.startsAt, ...ps.flatMap((p) => [p.finish?.at ?? 0, ...p.guesses.map((g) => g.at)]));
+    if (now - last < ABANDON_MS) return false;
+    for (const p of ps) p.finish ??= { at: last, found: false };
+    return true;
   }
 
   join(playerId, name, now) {

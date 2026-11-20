@@ -3,6 +3,7 @@ import { readFile, writeFile, rename, mkdir } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import { Duel, DuelError } from "./duel.js";
 import * as semantle from "./semantle.js";
+import * as vectors from "./vectors.js";
 
 const PORT = Number(process.env.PORT ?? 8080);
 const HOST = process.env.HOST ?? "127.0.0.1";
@@ -23,6 +24,12 @@ async function save(duel) {
 }
 
 async function loadRoom(id) {
+  const room = await findRoom(id);
+  if (room?.duel.expire(Date.now())) await save(room.duel);
+  return room;
+}
+
+async function findRoom(id) {
   if (rooms.has(id)) return rooms.get(id);
   if (!/^[a-z0-9]{5}$/.test(id)) return null;
   let raw;
@@ -35,6 +42,25 @@ const puzzles = new Map(); // number -> puzzle, so a busy day costs one fetch
 async function puzzle(number) {
   if (!puzzles.has(number)) puzzles.set(number, semantle.fetchPuzzle(number).catch((e) => (puzzles.delete(number), Promise.reject(e))));
   return puzzles.get(number);
+}
+
+// Score locally when we have the vectors and Semantle's top-1000 list for this
+// secret; otherwise (or for a word we don't know) ask Semantle per guess.
+const local = vectors.load(process.env.VECTORS_DIR ?? `${DATA}/vectors`);
+const nearby = new Map(); // secret -> Promise<Map word -> rank>
+
+async function score(word, secret) {
+  if (word === secret) return { score: 100, rank: 1000 };
+  const v = await local;
+  if (v) {
+    if (!nearby.has(secret)) {
+      if (nearby.size > 50) nearby.clear();
+      nearby.set(secret, semantle.nearest(secret).catch((e) => (nearby.delete(secret), Promise.reject(e))));
+    }
+    const [sim, ranks] = await Promise.all([v.similarity(word, secret), nearby.get(secret).catch(() => null)]);
+    if (sim !== null && ranks) return { score: sim, rank: ranks.get(word) ?? null };
+  }
+  return semantle.score(word, secret);
 }
 
 function newId() {
@@ -124,7 +150,7 @@ async function handle(req, res) {
     const word = String(msg.word ?? "").trim().toLowerCase();
     const why = duel.refusal(player, word, now);
     if (why) return json(res, 409, { error: why });
-    if (!room.scores.has(word)) room.scores.set(word, await semantle.score(word, duel.puzzle.secret));
+    if (!room.scores.has(word)) room.scores.set(word, await score(word, duel.puzzle.secret));
     const result = room.scores.get(word);
     if (!result) return json(res, 409, { error: "unknown word" });
     duel.guess(player, word, result, Date.now());
