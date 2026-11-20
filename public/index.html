@@ -112,6 +112,7 @@
   li.heads span { font-size: .75em; }
   li.latest { border-bottom: 1.5px solid var(--ink); margin-bottom: .5em; }
   li .n { color: var(--faint); font-size: .8em; }
+  li.pending { color: var(--faint); }
   li .w { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   li .w.hidden { filter: blur(5px); user-select: none; color: var(--faint); }
   li .s { text-align: right; }
@@ -264,7 +265,8 @@ async function archivePage() {
 function duelPage(id) {
   $("#duel").hidden = false;
   const base = `/d/${id}`;
-  let view = null, skew = 0, seen = null, draft = "";  // seen: guesses already drawn, so only new ones flash
+  let view = null, skew = 0, seen = null, draft = "", pending = [];  // pending: my guesses sent but not yet scored
+   // seen: guesses already drawn, so only new ones flash
   const open = new Set();  // opponents expanded on a phone
 
   const join = (name) => post(`${base}/join`, { player: me, name });
@@ -380,22 +382,31 @@ function duelPage(id) {
         setTimeout(() => { delete quit.dataset.sure; quit.textContent = "give up"; }, 2500);
       };
       form.append(input, err, quit);
+      const flash = (msg) => {
+        const e2 = $("#board .err");
+        if (e2) { e2.textContent = msg; e2.style.opacity = 1; setTimeout(() => (e2.style.opacity = 0), 1800); }
+      };
       form.onsubmit = async (e) => {
         e.preventDefault();
         const word = input.value.trim().toLowerCase();
         if (!word) return;
         draft = ""; input.value = "";
+        if (p.guesses.some((g) => g.word === word) || pending.includes(word)) return flash(`${word}: already guessed`);
+        pending.push(word); render();
         const r = await post(`${base}/guess`, { player: me, word });
         if (!r.ok) {
-          const e2 = $("#board .err");
-          if (e2) { e2.textContent = `${word}: ${r.error}`; e2.style.opacity = 1; setTimeout(() => (e2.style.opacity = 0), 1800); }
+          pending = pending.filter((w) => w !== word); render();
+          flash(`${word}: ${r.error}`);
         }
       };
       div.append(form);
     }
 
     const ol = el("ol", {});
-    if (p.guesses.length) ol.append(heads());
+    if (mine) pending = pending.filter((w) => !p.guesses.some((g) => g.word === w));
+    const waiting = mine ? pending : [];
+    if (p.guesses.length || waiting.length) ol.append(heads());
+    for (const w of waiting) ol.append(el("li", { class: "pending" }, el("span", { class: "n num" }, ""), el("span", { class: "w" }, w), el("span", { class: "s num" }, "…"), el("span", {})));
     const last = p.guesses.at(-1);
     let sorted = [...p.guesses].sort((a, b) => b.score - a.score);
     // a crowded table keeps opponents short until the end
