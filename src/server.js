@@ -17,10 +17,19 @@ const rooms = new Map();
 
 const fileOf = (id) => `${DATA}/${id}.json`;
 
-async function save(duel) {
-  const tmp = `${fileOf(duel.id)}.tmp`;
-  await writeFile(tmp, JSON.stringify(duel));
-  await rename(tmp, fileOf(duel.id));
+// One write at a time per duel: two guesses landing together used to race on
+// the same .tmp file, and the loser's request failed after its guess counted.
+const writing = new Map(); // id -> Promise
+
+function save(duel) {
+  const next = (writing.get(duel.id) ?? Promise.resolve()).catch(() => {}).then(async () => {
+    const tmp = `${fileOf(duel.id)}.tmp`;
+    await writeFile(tmp, JSON.stringify(duel));
+    await rename(tmp, fileOf(duel.id));
+  });
+  writing.set(duel.id, next);
+  next.finally(() => writing.get(duel.id) === next && writing.delete(duel.id)).catch(() => {});
+  return next;
 }
 
 async function loadRoom(id) {
@@ -128,7 +137,8 @@ async function handle(req, res) {
     const l = { player, res };
     room.listeners.add(l);
     send(res, duel.viewFor(player, Date.now()));
-    const ping = setInterval(() => res.write(": ping\n\n"), 25_000);
+    // a named event (not a comment) so the page can tell a dead stream from a quiet one
+    const ping = setInterval(() => res.write("event: ping\ndata: \n\n"), 15_000);
     req.on("close", () => (clearInterval(ping), room.listeners.delete(l)));
     return;
   }
@@ -146,6 +156,13 @@ async function handle(req, res) {
     if (!duel.players.has(player)) throw new DuelError("not in this duel");
     duel.start(now);
     setTimeout(() => broadcast(room), duel.startsAt - now + 10);
+  } else if (action === "rematch") {
+    if (!duel.players.has(player)) throw new DuelError("not in this duel");
+    // first one to ask picks the puzzle; everyone else is pointed at the same duel
+    if (!duel.next) {
+      room.rematch ??= createDuel(msg.puzzle).then((id) => (duel.next = id)).finally(() => (room.rematch = null));
+      await room.rematch;
+    }
   } else if (action === "guess") {
     const word = String(msg.word ?? "").trim().toLowerCase();
     const why = duel.refusal(player, word, now);
@@ -159,7 +176,8 @@ async function handle(req, res) {
   }
   await save(duel);
   broadcast(room);
-  return json(res, 200, { ok: true });
+  // the caller's own view comes back too, so a stalled event stream can't strand them
+  return json(res, 200, { ok: true, view: duel.viewFor(player, Date.now()) });
 }
 
 // Drop idle duels from memory; they stay on disk.

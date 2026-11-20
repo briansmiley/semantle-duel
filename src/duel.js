@@ -19,6 +19,7 @@ export class Duel {
     this.players = new Map();
     /** @type {number|null} */ this.startsAt = null;
     this.createdAt = now;
+    /** @type {string|null} the rematch duel, once someone asks for one */ this.next = null;
   }
 
   /** @returns {"lobby"|"countdown"|"playing"|"over"} */
@@ -96,6 +97,7 @@ export class Duel {
       endedAt: status === "over" ? this.endedAt() : null,
       secret: reveal ? this.puzzle.secret : null,
       max: MAX_PLAYERS,
+      next: this.next,
       you: viewerId,
       players: [...this.players.values()].map((p) => ({
         id: p.id,
@@ -113,13 +115,14 @@ export class Duel {
   }
 
   toJSON() {
-    return { id: this.id, puzzle: this.puzzle, players: [...this.players.values()], startsAt: this.startsAt, createdAt: this.createdAt };
+    return { id: this.id, puzzle: this.puzzle, players: [...this.players.values()], startsAt: this.startsAt, createdAt: this.createdAt, next: this.next };
   }
 
   static fromJSON(o) {
     const d = new Duel(o.id, o.puzzle, o.createdAt);
     for (const p of o.players) d.players.set(p.id, { finish: null, ...p });
     d.startsAt = o.startsAt;
+    d.next = o.next ?? null;
     // duels saved before players finished separately: the winner had found it
     if (o.won) {
       const w = d.players.get(o.won.player);
