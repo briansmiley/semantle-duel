@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>semantle duel</title>
+<!-- the "s" of the title, traced from Georgia so it looks the same where Georgia isn't installed -->
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='-130 -1065 1141 1141'><path fill='%23d4471f' transform='scale(1 -1)' d='M723 483Q764 447 786 400Q808 353 808 285Q808 148 705.5 61Q603 -26 440 -26Q354 -26 281.5 5Q209 36 178 62L158 -3H83L73 340H142Q150 301 176 249Q202 197 239 155Q278 111 332.5 81Q387 51 455 51Q551 51 603 94.5Q655 138 655 219Q655 261 638.5 291.5Q622 322 590 345Q557 368 509 386.5Q461 405 402 423Q355 437 297.5 461.5Q240 486 199 519Q155 554 127 605Q99 656 99 725Q99 846 189 930Q279 1014 430 1014Q488 1014 548.5 999Q609 984 647 963L670 1015H742L757 698H688Q667 804 597.5 870.5Q528 937 428 937Q346 937 299 896Q252 855 252 797Q252 752 267.5 722Q283 692 314 671Q344 651 389.5 633.5Q435 616 502 594Q568 573 626.5 545Q685 517 723 483Z'/></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet">
@@ -25,23 +27,25 @@
   .num { font-variant-numeric: tabular-nums; }
 
   /* home */
-  #home { min-height: calc(100dvh - 3.2rem); display: grid; place-content: center; gap: 2.5rem; padding: 16px; text-align: center; }
+  #home { min-height: calc(100dvh - 2rem); display: grid; place-content: center; gap: 2.5rem; padding: 16px; text-align: center; }
   #home h1 { font: 400 clamp(2.4rem, 9vw, 4.5rem)/1 Georgia, "Times New Roman", serif; letter-spacing: -.02em; margin: 0; }
   #home h1 i { color: var(--hot); }
   #home h1 { white-space: nowrap; cursor: default; -webkit-tap-highlight-color: transparent; }
-  /* the title's last word: "duel" swipes in, then flips through its neighbours and lands back on "duel" */
-  .roll { position: relative; display: inline-block; vertical-align: bottom; height: 1.2em; margin-bottom: -.12em; perspective: 4em; transition: width .45s cubic-bezier(.3,.7,.2,1); text-align: left; }
+  /* the title's last word: flips through guesses near "duel", then lands on it. Its width stays
+     pinned to "duel" so "semantle" holds still; longer guesses spill to the right. */
+  .roll { position: relative; display: inline-block; vertical-align: bottom; height: 1.2em; margin-bottom: -.12em; perspective: 4em; text-align: left; }
   .roll > span { position: absolute; left: 0; bottom: .12em; white-space: nowrap; font-style: italic; color: var(--hot); backface-visibility: hidden; transform-origin: 50% 50% -.4em; }
   .roll > span.won small { color: var(--hot); }
   .roll > span small { position: absolute; right: 0; top: 100%; margin-top: .05em; font: 400 .8rem/1 var(--serif); font-style: normal; color: var(--faint); font-variant-numeric: tabular-nums; letter-spacing: 0; }
   .roll > span.in { animation: flipin .5s cubic-bezier(.3,.7,.2,1) both; }
   .roll > span.out { animation: flipout .5s cubic-bezier(.5,0,.8,.4) both; }
   .roll > span.swipe { animation: swipe .7s cubic-bezier(.2,.8,.2,1) both; }
+  #home h1 .lead { display: inline-block; animation: swipe .8s cubic-bezier(.2,.8,.2,1) both; }
   @keyframes flipin { from { transform: rotateX(90deg); opacity: 0; } }
   @keyframes flipout { to { transform: rotateX(-90deg); opacity: 0; } }
-  @keyframes swipe { from { clip-path: inset(0 100% 0 0); transform: translateX(.6em); opacity: 0; } to { clip-path: inset(0 -1em 0 0); } }
+  @keyframes swipe { from { clip-path: inset(-.5em 100% -.5em 0); transform: translateX(.6em); opacity: 0; } to { clip-path: inset(-.5em -1em -.5em 0); } }
   @media (prefers-reduced-motion: no-preference) { .roll > span:not([class]) { opacity: 0; } }
-  @media (prefers-reduced-motion: reduce) { .roll > span { animation: none !important; } .roll { transition: none; } }
+  @media (prefers-reduced-motion: reduce) { .roll > span, #home h1 .lead { animation: none !important; } }
   #home nav { display: flex; gap: 2rem; justify-content: center; }
   #home nav button { font-size: 1.15rem; border-bottom: 1.5px solid currentColor; padding-bottom: 2px; }
   #home nav button, #home nav a { font-size: 1.15rem; border-bottom: 1.5px solid currentColor; padding-bottom: 2px; color: inherit; text-decoration: none; }
@@ -158,8 +162,8 @@
   @keyframes fresh { from { background: color-mix(in srgb, var(--hot) 14%, transparent); } }
 
   /* feedback */
-  #foot { text-align: center; padding: .6rem 16px 1.4rem; }
-  #foot button { color: var(--faint); font-size: .85rem; font-style: italic; border-bottom: 1px dotted var(--faint); }
+  #top { text-align: right; padding: .7rem 16px 0; }
+  #top button { color: var(--faint); font-size: .85rem; font-style: italic; border-bottom: 1px dotted var(--faint); }
   #report { border: 0; padding: 0; background: transparent; color: var(--ink); max-width: none; max-height: none; }
   #report::backdrop { background: color-mix(in srgb, var(--paper) 55%, transparent); backdrop-filter: blur(3px); }
   #report form { background: var(--paper); border: 1px solid var(--rule); box-shadow: 0 10px 40px rgb(0 0 0 / .18); width: min(30rem, calc(100vw - 32px)); padding: 1.3rem 1.3rem 1.1rem; display: grid; gap: .9rem; }
@@ -169,7 +173,6 @@
   #report textarea { font: inherit; color: inherit; background: none; border: 0; border-bottom: 1.5px solid var(--ink); border-radius: 0; resize: vertical; min-height: 6.5em; padding: 4px 0; outline: none; -webkit-appearance: none; }
   #report textarea:focus { border-bottom-color: var(--hot); }
   #report textarea::placeholder { color: var(--faint); font-style: italic; }
-  #report small { color: var(--faint); font-size: .78rem; line-height: 1.3; }
   #report .acts { display: flex; gap: 1.4rem; align-items: baseline; justify-content: flex-end; }
   #report .acts .send { font-size: 1.1rem; border-bottom: 2px solid var(--hot); }
   #report .acts .send:disabled { color: var(--faint); border-color: var(--rule); }
@@ -183,8 +186,10 @@
 </head>
 <body>
 
+<div id="top"><button type="button" id="bug">feedback</button></div>
+
 <main id="home" hidden>
-  <h1>semantle <span class="roll"><span><i>duel</i></span></span></h1>
+  <h1><span class="lead">semantle</span> <span class="roll"><span><i>duel</i></span></span></h1>
   <nav>
     <button data-puzzle="today">today’s word</button>
     <button data-puzzle="random" class="quiet">random</button>
@@ -217,13 +222,11 @@
   <section id="board" hidden></section>
 </main>
 
-<footer id="foot"><button type="button" id="bug">report a bug</button></footer>
 
 <dialog id="report">
   <form method="dialog">
     <h2><button type="button" data-kind="bug" aria-pressed="true">a bug</button><button type="button" data-kind="idea" aria-pressed="false">an idea</button></h2>
     <textarea maxlength="2000" required></textarea>
-    <small>Sends this with the page you’re on, the game’s state and your browser, so it can be tracked down.</small>
     <div class="acts"><span class="said"></span><button type="button" class="cancel">cancel</button><button class="send">send</button></div>
   </form>
 </dialog>
@@ -234,7 +237,7 @@ const store = {
   get(k) { try { return localStorage.getItem(k); } catch { return null; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch {} },
 };
-const me = store.get("sd-player") || (() => { const id = crypto.randomUUID(); store.set("sd-player", id); return id; })();
+const me = store.get("sd-player") || (() => { const id = crypto.randomUUID?.() ?? [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join(""); store.set("sd-player", id); return id; })();
 const path = location.pathname.split("/").filter(Boolean);
 
 // Never throws: a dropped or stalled request comes back as { ok: false } after 15s at most.
@@ -301,30 +304,110 @@ async function newDuel(puzzle, button) {
 }
 
 /* ---------- title ---------- */
-// Guesses warming up to "duel", scored as Semantle would (word2vec cosine × 100).
-const NEAR = [["rival", 35.77], ["rematch", 52.04], ["joust", 57.93], ["battle", 65.97], ["tussle", 70.86]];
-let rolling = null;
+// Semantle-scored (word2vec cosine × 100) neighbours of "duel": its nearest 400, minus typos, forms of
+// "duel" itself and a few odd fits. Each roll draws a few that fit on screen, coldest first, then lands on "duel".
+const NEAR = [
+  ["tussle", 70.86], ["showdown", 68.92], ["battle", 65.97], ["slugfest", 64.33], ["joust", 57.93],
+  ["skirmish", 57.86], ["showdowns", 57.38], ["matchup", 55.81], ["battles", 55.53], ["clash", 55.05],
+  ["dogfight", 54.83], ["rivalry", 53.75], ["rematch", 52.04], ["donnybrook", 51.21],
+  ["confrontation", 50.59], ["throwdown", 50.13], ["barnburner", 49.83], ["encounter", 49.3],
+  ["feud", 48.65], ["catfight", 47.46], ["tussles", 47.46], ["swordfight", 46.7], ["tiff", 46.41],
+  ["contest", 46.34], ["thrilling", 46.13], ["streetfight", 45.94], ["staredown", 45.17],
+  ["skirmishing", 45.05], ["squabble", 44.97], ["gunfight", 43.95], ["fisticuffs", 43.83], ["spat", 43.79],
+  ["skirmishes", 43.65], ["contretemps", 43.65], ["stoush", 42.54], ["rubbermatch", 42.46],
+  ["shootout", 42.43], ["quarrel", 42.27], ["fistfight", 42.22], ["sparring", 42.15], ["jousts", 42.11],
+  ["victor", 42.09], ["affair", 41.95], ["jousting", 41.84], ["finale", 41.82], ["slapfight", 41.65],
+  ["fight", 41.49], ["brawl", 41.4], ["prizefight", 41.32], ["fracas", 41.2], ["standoff", 41.14],
+  ["tussling", 41.07], ["race", 41.02], ["match", 40.93], ["nailbiter", 40.8], ["duked", 40.49],
+  ["smackdown", 40.25], ["sprint", 40.1], ["outpunch", 39.95], ["melee", 39.9], ["nailbiting", 39.73],
+  ["romp", 39.71], ["heroics", 39.58], ["enthralling", 39.56], ["decider", 39.55], ["struggle", 39.52],
+  ["interplay", 39.5], ["duke", 39.49], ["footrace", 39.42], ["scuffle", 39.16], ["rivalries", 39.14],
+  ["matchups", 39.01], ["dustup", 38.85], ["duking", 38.78], ["gunbattle", 38.77], ["semifinal", 38.74],
+  ["supremacy", 38.69], ["banter", 38.67], ["tangle", 38.67], ["feuds", 38.51], ["fisticuff", 38.33],
+  ["pairing", 38.31], ["firefight", 38.12], ["slugfests", 37.96], ["chase", 37.93], ["game", 37.83],
+  ["debate", 37.83], ["nemesis", 37.58], ["dispute", 37.53], ["outlasted", 37.43], ["saga", 37.35],
+  ["cliffhanger", 37.06], ["epic", 36.92], ["hardfought", 36.89], ["competition", 36.83],
+  ["spectacle", 36.81], ["repartee", 36.81], ["shootoff", 36.8], ["outpowered", 36.74], ["bout", 36.66],
+  ["wits", 36.62], ["clashes", 36.61], ["salvo", 36.59], ["encounters", 36.49], ["punchup", 36.44],
+  ["feuding", 36.33], ["archrivals", 36.12], ["derby", 36.06], ["humdinger", 36.03], ["rival", 35.77],
+  ["dramatics", 35.76], ["stalemate", 35.68], ["sniping", 35.66], ["rematched", 35.52],
+  ["quarterfinal", 35.45], ["gamesmanship", 35.42], ["donnybrooks", 35.33], ["brawls", 35.27],
+  ["tug", 35.25], ["brawling", 35.22], ["wrangle", 35.16], ["bareknuckle", 35.13], ["outguns", 35.08],
+  ["collide", 34.94], ["scintillating", 34.94], ["jockeying", 34.79], ["bodyslamming", 34.76],
+  ["outlasting", 34.75], ["tripleheader", 34.7], ["spats", 34.55], ["victory", 34.52], ["outmuscles", 34.51],
+  ["snoozer", 34.45], ["swordfights", 34.41], ["warring", 34.34], ["victorious", 34.31], ["debates", 34.2],
+  ["fights", 34.18], ["nemeses", 34.15], ["superfight", 34.05], ["coinflip", 33.98], ["endgame", 33.9],
+  ["staredowns", 33.87], ["gunfighting", 33.86], ["bantering", 33.73], ["rivals", 33.7], ["opener", 33.63],
+  ["altercation", 33.6], ["outbattled", 33.54], ["outbattling", 33.47], ["frontrunners", 33.47],
+  ["counterattack", 33.46], ["scuffles", 33.41], ["titanic", 33.39], ["adversary", 33.32],
+  ["pursuers", 33.22], ["duo", 33.19], ["triumph", 33.17], ["victors", 33.07], ["rapier", 33.06],
+  ["twosome", 33.04], ["putdown", 33.01], ["fierce", 32.98], ["standoffs", 32.96], ["slugging", 32.85],
+  ["outplay", 32.83], ["outpunching", 32.83], ["bloodfest", 32.83], ["snoozefest", 32.8], ["vie", 32.75],
+  ["onslaught", 32.74], ["warfare", 32.73], ["bunfight", 32.71], ["outmaneuvered", 32.7], ["yawner", 32.67],
+  ["lovefest", 32.63], ["foe", 32.59], ["riveting", 32.58], ["outpower", 32.55], ["fightback", 32.51],
+  ["battlelines", 32.5], ["outclass", 32.49], ["winner", 32.45], ["testiest", 32.45], ["bickering", 32.44],
+  ["spelldown", 32.42], ["squeaker", 32.39], ["outgun", 32.35], ["outclasses", 32.34], ["courtship", 32.33],
+  ["blazing", 32.28], ["pankration", 32.27], ["bromance", 32.26], ["firefights", 32.24], ["tangling", 32.24],
+  ["jawing", 32.23], ["clincher", 32.23], ["swordplay", 32.18], ["quarrels", 32.15], ["snorefest", 32.07],
+  ["ferocious", 32.04], ["play", 32.03], ["outfoxes", 31.99], ["denouement", 31.95], ["deathmatches", 31.94],
+  ["intrigue", 31.9], ["byplay", 31.89], ["thrilla", 31.88], ["tacticians", 31.87], ["pursuit", 31.86],
+  ["romps", 31.85], ["outing", 31.85], ["nerveless", 31.84], ["salvos", 31.82], ["challenge", 31.8],
+  ["pacesetters", 31.79], ["slug", 31.78], ["conqueror", 31.78], ["duos", 31.73], ["outwrestling", 31.71],
+  ["dominance", 31.69], ["upsetter", 31.69], ["slugged", 31.65], ["escapade", 31.64], ["sizzler", 31.63],
+  ["coronation", 31.62], ["scorcher", 31.59], ["battleground", 31.57], ["rematches", 31.51],
+  ["hijinks", 31.45], ["interlude", 31.43], ["sparred", 31.4], ["gladiators", 31.37], ["jawed", 31.34],
+  ["bested", 31.23], ["outclassed", 31.23], ["eliminator", 31.22], ["odyssey", 31.17],
+  ["challengers", 31.11], ["teamplay", 31.1], ["tiebreaker", 31.1], ["outfight", 31.08], ["haymaker", 31.06],
+  ["titans", 31.04], ["clashing", 31.04], ["sideshow", 31.03], ["rout", 31.02], ["dethroned", 31.02],
+  ["triumphed", 31.01], ["screamfest", 31.01], ["gunfights", 30.99], ["sprinting", 30.96],
+  ["rapiers", 30.96], ["swords", 30.93], ["wrangling", 30.93], ["triumvirate", 30.93], ["cannonade", 30.92],
+  ["outpunched", 30.92], ["hostilities", 30.91], ["rematching", 30.84], ["tryst", 30.83],
+  ["seesawing", 30.79], ["outfought", 30.78], ["shocker", 30.74], ["dogfights", 30.74],
+  ["brilliance", 30.72], ["showboated", 30.72], ["challenger", 30.72], ["mindgames", 30.7],
+  ["outsmarts", 30.7], ["collision", 30.67], ["disputation", 30.65], ["quest", 30.63], ["contenders", 30.6],
+  ["darkhorses", 30.6], ["outgunning", 30.6], ["compete", 30.56], ["scramble", 30.55],
+  ["chessboxing", 30.52], ["beat", 30.51], ["lunge", 30.49], ["slayer", 30.45], ["outfighting", 30.45],
+  ["outwit", 30.45], ["photofinish", 30.44], ["roistering", 30.43], ["contests", 30.41], ["intrigues", 30.4],
+  ["maneuvering", 30.38], ["jostling", 30.36], ["roughhouse", 30.35], ["pretender", 30.33],
+  ["electrifying", 30.32], ["win", 30.28], ["tie", 30.27]
+];
+let rolling = null, rolled = false;
 
 async function rollTitle() {
   const roll = $("#home .roll");
-  if (!roll.style.width) roll.style.width = roll.firstElementChild.offsetWidth + "px";
   if (rolling || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   rolling = true;
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   const card = (w, score) => el("span", {}, el("i", {}, w), score == null ? "" : el("small", {}, score.toFixed(2)));
   await document.fonts?.ready;
+  if (!roll.style.width) roll.style.width = roll.firstElementChild.offsetWidth + "px";
   const show = (span, cls) => {
     const old = roll.firstElementChild;
     roll.append(span);
-    roll.style.width = span.offsetWidth + "px";
     span.className = cls;
     if (old && cls.startsWith("in")) { old.className = "out"; old.onanimationend = () => old.remove(); }
     else old?.remove();
     return span;
   };
-  show(card("duel"), "swipe");
-  await wait(1700);
-  for (const [w, sc] of NEAR) { show(card(w, sc), "in"); await wait(850); }
+  if (!rolled) await wait(900);  // "semantle" sweeps in first, on load only
+  rolled = true;
+  show(card("…"), "swipe");
+  await wait(1100);
+  // Five that fit between the title and the screen's edge, no two sharing a stem ("battle"/"battles") or a score.
+  // Measured by rendering each word in a hidden card, so it's the title's real font and size.
+  const room = innerWidth - roll.getBoundingClientRect().left - 16;
+  const probe = roll.appendChild(el("span", { class: "probe", style: "visibility: hidden" }, el("i", {})));
+  const pool = NEAR.filter(([w]) => ((probe.firstChild.textContent = w), probe.offsetWidth <= room));
+  probe.remove();
+  for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+  const picks = [], stems = new Set(), scores = new Set();
+  for (const [w, sc] of pool) {
+    if (picks.length === 5) break;
+    if (stems.has(w.slice(0, 5)) || scores.has(sc)) continue;
+    picks.push([w, sc]); stems.add(w.slice(0, 5)); scores.add(sc);
+  }
+  picks.sort((a, b) => a[1] - b[1]);
+  for (const [i, [w, sc]] of picks.entries()) { show(card(w, sc), "in"); await wait(1250); }
   const last = show(card("duel", 100), "in won");
   await wait(1500);
   const n = last.querySelector("small");
@@ -345,7 +428,7 @@ let currentView = null;  // the duel on screen, if any
   const pick = (k) => {
     kind = k;
     for (const b of $("#report h2").children) b.setAttribute("aria-pressed", String(b.dataset.kind === k));
-    ta.placeholder = k === "bug" ? "what happened, and what did you expect?" : "what would make it better?";
+    ta.placeholder = k === "bug" ? "What’s wrong?" : "What could be better?";
   };
   for (const b of $("#report h2").children) b.onclick = () => pick(b.dataset.kind);
   $("#bug").onclick = () => { pick("bug"); said.textContent = ""; send.disabled = false; d.showModal(); ta.focus(); };
