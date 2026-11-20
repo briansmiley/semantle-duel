@@ -126,7 +126,7 @@ async function handle(req, res) {
 
   if (req.method === "POST" && url.pathname === "/feedback") {
     const address = String(req.headers["fly-client-ip"] ?? req.socket.remoteAddress);
-    const [code, out] = await receiveFeedback(await body(req, 16_384), address);
+    const [code, out] = await receiveFeedback(await body(req, 3_000_000), address);  // room for a screenshot
     return json(res, code, out);
   }
 

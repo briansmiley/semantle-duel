@@ -1,14 +1,16 @@
-// Bug reports and ideas: POST /feedback, from the "report a bug" link on every page.
-// Each report is written to the data volume first (DATA_DIR/feedback/<id>.json); only then is the sender
-// answered. After that it is passed on to whichever of these is set up, and the file notes where it went:
-// - FEEDBACK_WEBHOOK: a Discord webhook URL; the report is posted to its channel.
+// Bug reports and ideas: POST /feedback, from the "feedback" link on every page.
+// Each report is written to the data volume first (DATA_DIR/feedback/<id>.json, and its screenshot, if any,
+// beside it as <id>.jpg); only then is the sender answered. After that it is passed on to whichever of these is
+// set up, and the file notes where it went:
+// - FEEDBACK_WEBHOOK: a Discord webhook URL; the report is posted to its channel, the screenshot attached.
 // - LINEAR_API_KEY (a personal API key): an issue is filed in LINEAR_TEAM (a team key, default SMI), in
-//   LINEAR_PROJECT (by name, default "Semantle Duel") if it exists, labelled Bug or Feature if the team has one.
+//   LINEAR_PROJECT (by name, default "Semantle Duel") if it exists, labelled Bug or Feature if the team has one;
+//   the screenshot goes up to Linear's storage and into the description.
 // - ANTHROPIC_API_KEY (optional, alongside either): Claude Haiku titles each report and judges how much it matters
 //   (the issue's priority; never Urgent, since it's a player's word). Without it, or if that fails, a report is
 //   titled by its first line and filed with no priority.
 
-import { writeFile, rename, mkdir } from "node:fs/promises";
+import { writeFile, rename, mkdir, readdir, stat } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import { jsonSchemaOutputFormat } from "@anthropic-ai/sdk/helpers/json-schema";
@@ -17,6 +19,10 @@ export const MAX_TEXT = 2000;
 const RATE_MAX = 6, RATE_WINDOW_MS = 60_000; // per address
 const PATIENCE_MS = 10_000; // per call out to Discord, Linear or Claude
 const TITLE_MAX = 80;
+// Screenshots kept on the volume, in all. Past this a report is kept without its picture (it's still passed on):
+// duels are saved on the same volume, and a full disk would stop those.
+const MAX_KEPT_IMAGE_BYTES = 200 << 20;
+const IMAGE_RE = /^data:image\/jpeg;base64,([A-Za-z0-9+/=]+)$/;  // what the page makes of any picture
 
 /** At most `max` characters, with an ellipsis where it was cut. */
 const clip = (s, max) => {
@@ -37,6 +43,11 @@ export function feedback({ dir, env = process.env }) {
   const linear = env.LINEAR_API_KEY ? { key: env.LINEAR_API_KEY, team: env.LINEAR_TEAM || "SMI", project: env.LINEAR_PROJECT || "Semantle Duel" } : null;
   const claude = env.ANTHROPIC_API_KEY ? new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, timeout: PATIENCE_MS, maxRetries: 0 }) : null;
   const ready = mkdir(dir, { recursive: true });
+  let kept = ready.then(async () => {  // bytes of screenshots on the volume so far
+    let n = 0;
+    for (const f of await readdir(dir)) if (f.endsWith(".jpg")) n += (await stat(`${dir}/${f}`)).size;
+    return n;
+  }).catch(() => Infinity);
   const recent = new Map(); // address -> times
 
   const keep = async (r) => {
@@ -44,6 +55,14 @@ export function feedback({ dir, env = process.env }) {
     const file = `${dir}/${r.id}.json`;
     await writeFile(`${file}.tmp`, JSON.stringify(r, null, 1));
     await rename(`${file}.tmp`, file);
+  };
+  /** The screenshot's file name if it was written, else null (the report goes on without it). */
+  const keepImage = async (id, image) => {
+    const total = await kept;
+    if (total + image.length > MAX_KEPT_IMAGE_BYTES) return (console.error("feedback", id, "screenshot not kept: volume cap reached"), null);
+    kept = Promise.resolve(total + image.length);
+    try { await writeFile(`${dir}/${id}.jpg`, image); return `${id}.jpg`; }
+    catch (e) { console.error("feedback", id, "screenshot not kept:", e.message); return null; }
   };
 
   const call = (url, init) => fetch(url, { ...init, signal: AbortSignal.timeout(PATIENCE_MS) });
@@ -94,9 +113,28 @@ export function feedback({ dir, env = process.env }) {
     return { teamId, projectId: d.projects.nodes[0]?.id, labels: { bug: label("Bug"), idea: label("Feature") } };
   })().catch((e) => ((where = null), Promise.reject(e))));
 
-  const toLinear = async (r, heading) => {
+  // The screenshot into Linear's own storage, as markdown for the description; "" if there's none or it fails.
+  const linearImage = async (r, image) => {
+    if (!image) return "";
+    try {
+      const d = await gql(
+        `mutation($type: String!, $name: String!, $size: Int!) { fileUpload(contentType: $type, filename: $name, size: $size) { uploadFile { uploadUrl assetUrl headers { key value } } } }`,
+        { type: "image/jpeg", name: `feedback-${r.id}.jpg`, size: image.length },
+      );
+      const f = d.fileUpload.uploadFile;
+      const res = await call(f.uploadUrl, { method: "PUT", headers: { "content-type": "image/jpeg", "cache-control": "public, max-age=31536000", ...Object.fromEntries(f.headers.map((h) => [h.key, h.value])) }, body: image });
+      if (!res.ok) throw new Error(`upload: ${res.status}`);
+      return `\n\n![screenshot](${f.assetUrl})`;
+    } catch (e) {
+      console.error("feedback", r.id, "screenshot to Linear:", e.message);
+      return "";
+    }
+  };
+
+  const toLinear = async (r, heading, image) => {
     const [{ teamId, projectId, labels }, { title, priority }] = await Promise.all([lookup(), heading]);
-    const input = { teamId, title: `[FEEDBACK] ${title}`, description: describe(r, "markdown") };
+    const picture = await linearImage(r, image);
+    const input = { teamId, title: `[FEEDBACK] ${title}`, description: describe(r, "markdown") + picture };
     if (priority) input.priority = priority;
     if (projectId) input.projectId = projectId;
     if (labels[r.kind]) input.labelIds = [labels[r.kind]];
@@ -105,11 +143,8 @@ export function feedback({ dir, env = process.env }) {
   };
 
   // ---- Discord
-  const toDiscord = async (r, { title }, issue) => {
-    const res = await call(webhook, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
+  const toDiscord = async (r, { title }, issue, image) => {
+    const payload = {
         username: "semantle duel",
         allowed_mentions: { parse: [] },
         embeds: [{
@@ -122,18 +157,26 @@ export function feedback({ dir, env = process.env }) {
             ...(issue ? [{ name: "Linear", value: `[${issue.identifier}](${issue.url})`, inline: true }] : []),
             { name: "Where", value: "```\n" + describe(r, "plain").slice(0, 1000) + "\n```" },
           ],
+          ...(image ? { image: { url: "attachment://screenshot.jpg" } } : {}),
           timestamp: new Date(r.at).toISOString(),
         }],
-      }),
-    });
+    };
+    let body = JSON.stringify(payload), headers = { "content-type": "application/json" };
+    if (image) {  // the picture goes up with the message, as a file the embed points at
+      body = new FormData();
+      body.append("payload_json", JSON.stringify(payload));
+      body.append("files[0]", new Blob([image], { type: "image/jpeg" }), "screenshot.jpg");
+      headers = {};
+    }
+    const res = await call(webhook, { method: "POST", headers, body });
     if (!res.ok) throw new Error(`Discord: ${res.status}`);
   };
 
-  const pass = async (r) => {
+  const pass = async (r, image) => {
     const heading = head(r); // asked for while Linear is looked up
-    const issue = linear ? await toLinear(r, heading).catch((e) => (console.error("feedback", r.id, e.message), null)) : null;
+    const issue = linear ? await toLinear(r, heading, image).catch((e) => (console.error("feedback", r.id, e.message), null)) : null;
     const named = await heading;
-    const discord = webhook ? await toDiscord(r, named, issue).then(() => true, (e) => (console.error("feedback", r.id, e.message), false)) : null;
+    const discord = webhook ? await toDiscord(r, named, issue, image).then(() => true, (e) => (console.error("feedback", r.id, e.message), false)) : null;
     await keep({ ...r, heading: named, sent: { linear: issue, discord } }).catch((e) => console.error("feedback", r.id, e));
   };
 
@@ -147,6 +190,9 @@ export function feedback({ dir, env = process.env }) {
     const text = String(msg.text ?? "").trim().slice(0, MAX_TEXT);
     if (!text) return [400, { error: "say what happened" }];
     const c = typeof msg.context === "object" && msg.context ? msg.context : {};
+    const m = typeof msg.image === "string" ? IMAGE_RE.exec(msg.image) : null;
+    const image = m ? Buffer.from(m[1], "base64") : null;
+    if (msg.image != null && !(image?.[0] === 0xff && image?.[1] === 0xd8)) return [400, { error: "that screenshot didn’t come through; try another" }];
     const r = {
       id: `${new Date(now).toISOString().slice(0, 10)}-${randomBytes(3).toString("hex")}`,
       at: now,
@@ -166,8 +212,9 @@ export function feedback({ dir, env = process.env }) {
         errors: Array.isArray(c.errors) ? c.errors.slice(-5).map((e) => String(e).slice(0, 300)) : [],
       },
     };
+    if (image) r.screenshot = await keepImage(r.id, image);
     await keep(r);
-    pass(r); // in the background; the report is already safe
+    pass(r, image); // in the background; the report is already safe
     return [200, { ok: true }];
   };
 }

@@ -20,8 +20,9 @@
   }
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
+  html { font-size: 110%; }  /* everything sized in rem scales with this */
   html, body { margin: 0; background: var(--paper); color: var(--ink); }
-  body { font: 18px/1.35 var(--serif); font-variant-numeric: lining-nums; min-height: 100dvh; }
+  body { font: 1.125rem/1.35 var(--serif); font-variant-numeric: lining-nums; min-height: 100dvh; }
   button, input { font: inherit; color: inherit; }
   button { background: none; border: 0; padding: 0; cursor: pointer; }
   .num { font-variant-numeric: tabular-nums; }
@@ -71,7 +72,8 @@
   /* duel */
   #duel { max-width: 980px; margin: 0 auto; padding: 18px 16px 60px; }
   header { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
-  header .no { color: var(--faint); }
+  header .no { color: var(--faint); text-decoration: none; border-bottom: 1px dotted var(--faint); }
+  header .no:hover { color: var(--ink); }
   #clock.stopped { color: var(--faint); }
   #pausebar { color: var(--faint); font-size: .95rem; margin-left: .5em; }
   #pausebar button { color: var(--ink); border-bottom: 1px solid currentColor; margin-left: .3em; }
@@ -79,7 +81,7 @@
   .side form .submit { font-size: 1.05rem; border-bottom: 2px solid var(--hot); padding-bottom: 1px; }
   .side form .submit:disabled { color: var(--faint); border-color: var(--rule); cursor: default; }
   #clock { font: 400 clamp(2.6rem, 10vw, 4rem)/1 var(--serif); letter-spacing: -.02em; }
-  #share { color: var(--faint); font-size: .9rem; border-bottom: 1px dotted var(--faint); }
+  #share { color: var(--faint); font-size: 1rem; border-bottom: 1px dotted var(--faint); }
   #banner { font: 400 1.5rem/1.2 var(--serif); margin: 1.4rem 0 .4rem; }
   #banner b { color: var(--hot); font-weight: 400; }
 
@@ -162,20 +164,33 @@
   @keyframes fresh { from { background: color-mix(in srgb, var(--hot) 14%, transparent); } }
 
   /* feedback */
-  #top { text-align: right; padding: .7rem 16px 0; }
-  #top button { color: var(--faint); font-size: .85rem; font-style: italic; border-bottom: 1px dotted var(--faint); }
+  #top { display: flex; align-items: baseline; padding: .7rem 16px 0; max-width: 980px; margin: 0 auto; }
+  #top #bug { margin-left: auto; }
+  #top .logo { font: 400 1.6rem/1 Georgia, "Times New Roman", serif; letter-spacing: -.02em; color: inherit; text-decoration: none; }
+  #top .logo i { color: var(--hot); }
+  #top button { color: var(--faint); font-size: 1rem; font-style: italic; border-bottom: 1px dotted var(--faint); }
   #report { border: 0; padding: 0; background: transparent; color: var(--ink); max-width: none; max-height: none; }
   #report::backdrop { background: color-mix(in srgb, var(--paper) 55%, transparent); backdrop-filter: blur(3px); }
   #report form { background: var(--paper); border: 1px solid var(--rule); box-shadow: 0 10px 40px rgb(0 0 0 / .18); width: min(30rem, calc(100vw - 32px)); padding: 1.3rem 1.3rem 1.1rem; display: grid; gap: .9rem; }
   #report h2 { font: 400 1.35rem/1.1 var(--serif); margin: 0; display: flex; gap: .9rem; align-items: baseline; }
   #report h2 button { color: var(--faint); border-bottom: 1.5px solid transparent; }
   #report h2 button[aria-pressed="true"] { color: var(--ink); border-color: var(--hot); }
-  #report textarea { font: inherit; color: inherit; background: none; border: 0; border-bottom: 1.5px solid var(--ink); border-radius: 0; resize: vertical; min-height: 6.5em; padding: 4px 0; outline: none; -webkit-appearance: none; }
-  #report textarea:focus { border-bottom-color: var(--hot); }
+  #report textarea { font: inherit; color: inherit; background: none; border: 1px solid var(--rule); border-radius: 2px; resize: vertical; min-height: 6.5em; padding: .5em .65em; outline: none; -webkit-appearance: none; }
+  #report textarea:focus { border-color: var(--faint); }
   #report textarea::placeholder { color: var(--faint); font-style: italic; }
+  /* like Nertz's: a dashed drop box, then a thumbnail with a bin on its corner */
+  #report .attach { display: block; padding: .5rem .6rem; border: 1.5px dashed var(--faint); border-radius: 8px; text-align: center; color: var(--faint); cursor: pointer; font-size: .95rem; }
+  #report .attach:hover { color: var(--ink); border-color: var(--ink); }
+  #report .attach small { font-style: italic; }
+  #report svg { width: 1.15em; height: 1.15em; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  #report .attach svg { margin-right: .35em; vertical-align: -.2em; }
+  #report .shot { position: relative; width: max-content; }
+  #report .shot img { display: block; width: 96px; max-height: 64px; object-fit: cover; border: 1.5px solid var(--ink); border-radius: 6px; }
+  #report .unshot { position: absolute; top: -8px; right: -8px; display: grid; place-items: center; width: 26px; height: 26px; border: 1.5px solid var(--ink); border-radius: 99px; background: var(--paper); }
+  #report .unshot svg { width: 15px; height: 15px; }
   #report .acts { display: flex; gap: 1.4rem; align-items: baseline; justify-content: flex-end; }
-  #report .acts .send { font-size: 1.1rem; border-bottom: 2px solid var(--hot); }
-  #report .acts .send:disabled { color: var(--faint); border-color: var(--rule); }
+  #report .acts .send { font-size: 1.1rem; color: var(--hot); }
+  #report .acts .send:disabled { color: var(--faint); }
   #report .acts .cancel { color: var(--faint); }
   #report .said { color: var(--hot); font-style: italic; margin-right: auto; }
   @media (max-width: 560px) {
@@ -186,7 +201,7 @@
 </head>
 <body>
 
-<div id="top"><button type="button" id="bug">feedback</button></div>
+<div id="top"><a href="/" class="logo" title="home" hidden>s<i>d</i></a><button type="button" id="bug">feedback</button></div>
 
 <main id="home" hidden>
   <h1><span class="lead">semantle</span> <span class="roll"><span><i>duel</i></span></span></h1>
@@ -207,7 +222,7 @@
   <header>
     <div>
       <div id="clock" class="num">0:00</div>
-      <span class="no num"></span><span id="pausebar"></span>
+      <a class="no num" target="_blank" rel="noopener" title="this puzzle on semantle.com"></a><span id="pausebar"></span>
     </div>
     <button id="share" title="copy link">copy link</button>
   </header>
@@ -227,6 +242,8 @@
   <form method="dialog">
     <h2><button type="button" data-kind="bug" aria-pressed="true">a bug</button><button type="button" data-kind="idea" aria-pressed="false">an idea</button></h2>
     <textarea maxlength="2000" required></textarea>
+    <label class="attach"><input type="file" accept="image/*" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.6"/><path d="M4 17.5l5-5 3.5 3.5 2.5-2.5 5 4.5"/></svg>screenshot <small>(click, drag, or paste)</small></label>
+    <div class="shot" hidden><img alt="the attached screenshot"><button type="button" class="unshot" aria-label="remove the screenshot" title="remove the screenshot"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M10 7V4.8h4V7M7 7l.8 12.2h8.4L17 7M10.3 10.5v5.5M13.7 10.5v5.5"/></svg></button></div>
     <div class="acts"><span class="said"></span><button type="button" class="cancel">cancel</button><button class="send">send</button></div>
   </form>
 </dialog>
@@ -433,6 +450,29 @@ let currentView = null;  // the duel on screen, if any
   for (const b of $("#report h2").children) b.onclick = () => pick(b.dataset.kind);
   $("#bug").onclick = () => { pick("bug"); said.textContent = ""; send.disabled = false; d.showModal(); ta.focus(); };
   $("#report .cancel").onclick = () => d.close();
+
+  // A screenshot, picked, dropped or pasted: shrunk to a JPEG no bigger than 1600px on its longer side.
+  let image = null;
+  const shot = $("#report .shot"), attachLink = $("#report .attach");
+  const setImage = (url) => { image = url; shot.hidden = !url; attachLink.hidden = !!url; if (url) $("img", shot).src = url; };
+  const shrink = async (file) => {
+    const bmp = await createImageBitmap(file);
+    const scale = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+    const c = Object.assign(document.createElement("canvas"), { width: Math.round(bmp.width * scale), height: Math.round(bmp.height * scale) });
+    c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+    bmp.close();
+    return c.toDataURL("image/jpeg", 0.82);
+  };
+  const attach = async (file) => {
+    if (!file?.type.startsWith("image/")) return;
+    try { setImage(await shrink(file)); } catch { said.textContent = "couldn’t read that picture"; }
+  };
+  const imageIn = (files) => [...files].find((f) => f.type.startsWith("image/"));
+  $("input", attachLink).onchange = (e) => { attach(e.target.files[0]); e.target.value = ""; };
+  $("#report .unshot").onclick = () => setImage(null);
+  d.addEventListener("paste", (e) => { const f = imageIn(e.clipboardData.files); if (f) { e.preventDefault(); attach(f); } });
+  d.addEventListener("dragover", (e) => e.preventDefault());
+  d.addEventListener("drop", (e) => { e.preventDefault(); attach(imageIn(e.dataTransfer.files)); });
   d.onclick = (e) => { if (e.target === d) d.close(); };  // tap outside (braces: an onclick returning false would cancel the send)
   $("#report form").onsubmit = async (e) => {
     e.preventDefault();
@@ -440,7 +480,7 @@ let currentView = null;  // the duel on screen, if any
     send.disabled = true; said.textContent = "sending…";
     const v = currentView;
     const r = await post("/feedback", {
-      kind, text: ta.value, player: me, name: store.get("sd-name") ?? "",
+      kind, text: ta.value, player: me, name: store.get("sd-name") ?? "", image,
       context: {
         page: location.pathname + location.search, duel: v?.id, number: v?.number, status: v?.status,
         guesses: v?.players.find((p) => p.id === me)?.guesses.length,
@@ -451,12 +491,13 @@ let currentView = null;  // the duel on screen, if any
     if (!r.ok) { said.textContent = r.error ?? "didn’t send, try again"; send.disabled = false; return; }
     said.textContent = "thanks, got it";
     ta.value = "";
+    setImage(null);
     setTimeout(() => d.close(), 1200);
   };
 }
 
 /* ---------- pages ---------- */
-if (path[0] === "d") duelPage(path[1]);
+if (path[0] === "d") { $("#top .logo").hidden = false; duelPage(path[1]); }  // home and archive have their own way home
 else if (path[0] === "archive") archivePage();
 else {
   $("#home").hidden = false;
@@ -510,7 +551,7 @@ function duelPage(id) {
   let note = null;  // {word, msg}: why my last word didn't count
   let picking = false, today = null;  // rematch: choosing a puzzle
   const open = new Set();  // opponents expanded on a phone
-  fetch("/today").then((r) => r.json()).then((t) => (today = t.number)).catch(() => {});
+  fetch("/today").then((r) => r.json()).then((t) => { today = t.number; if (view) render(); }).catch(() => {});
 
   const join = (name) => post(`${base}/join`, { player: me, name });
   const savedName = store.get("sd-name");
@@ -525,6 +566,14 @@ function duelPage(id) {
     $("#name").blur();
   };
   $("#name").onblur = () => $("#nameform").requestSubmit();
+  // Your name in the list follows the box as you type; everyone else sees it once you pause.
+  let naming = null;
+  $("#name").oninput = () => {
+    const name = $("#name").value.trim();
+    if (view?.status === "lobby") render();
+    clearTimeout(naming);
+    if (name) naming = setTimeout(() => (store.set("sd-name", name), join(name)), 300);
+  };
   $("#go").onclick = () => post(`${base}/start`, { player: me });
   $("#share").onclick = async () => {
     try { await navigator.clipboard.writeText(location.href); $("#share").textContent = "copied"; }
@@ -575,7 +624,9 @@ function duelPage(id) {
   function render() {
     const v = view;
     remember(v);
-    $(".no").textContent = `#${v.number}`;
+    $(".no").textContent = `#${v.number}${v.number === today ? " (today)" : ""}`;
+    // semantle.com's archive only has past puzzles; today's is its front page
+    $(".no").href = v.number === today ? "https://semantle.com/" : `https://semantle.com/archive/game?num=${v.number}`;
     const inIt = v.players.some((p) => p.id === me);
     const lobby = v.status === "lobby";
 
@@ -583,7 +634,9 @@ function duelPage(id) {
     $("#share").hidden = !lobby;
     if (lobby) {
       const who = $("#lobby .who");
-      who.replaceChildren(...v.players.map((p) => el("span", { class: p.id === me ? "me" : "" }, p.name)));
+      who.replaceChildren(...v.players.map((p) => p.id === me
+        ? el("span", { class: "me" }, $("#name").value.trim() || p.name)
+        : el("span", {}, p.name)));
       if (v.players.length < v.max) who.append(el("span", { class: "empty" }, "…"));
       $("#nameform").hidden = !inIt && v.players.length >= v.max;
       $("#go").disabled = !(inIt && v.players.length >= 2);
