@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>semantle duel</title>
+<style>
+  :root {
+    --paper: #f6f3ec; --ink: #1d1b18; --faint: #8b857a; --rule: #ddd6c8;
+    --hot: #d4471f; --warm: #d98b2b; --cool: #6b8fa3; --you: #1d1b18;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --paper: #15140f; --ink: #ece6d8; --faint: #7e786c; --rule: #2c2a24; --you: #ece6d8; }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); }
+  body { font: 16px/1.35 ui-sans-serif, -apple-system, "Helvetica Neue", sans-serif; min-height: 100dvh; }
+  button, input { font: inherit; color: inherit; }
+  button { background: none; border: 0; padding: 0; cursor: pointer; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* home */
+  #home { min-height: 100dvh; display: grid; place-content: center; gap: 2.5rem; padding: 16px; text-align: center; }
+  #home h1 { font: 400 clamp(2.4rem, 9vw, 4.5rem)/1 Georgia, "Times New Roman", serif; letter-spacing: -.02em; margin: 0; }
+  #home h1 i { color: var(--hot); }
+  #home nav { display: flex; gap: 2rem; justify-content: center; }
+  #home nav button { font-size: 1.15rem; border-bottom: 1.5px solid currentColor; padding-bottom: 2px; }
+  #home nav button, #home nav a { font-size: 1.15rem; border-bottom: 1.5px solid currentColor; padding-bottom: 2px; color: inherit; text-decoration: none; }
+  #home nav .quiet { color: var(--faint); }
+
+  /* archive */
+  #archive { max-width: 640px; margin: 0 auto; padding: 22px 16px 60px; }
+  #archive .back { font: 400 1.6rem/1 Georgia, serif; color: inherit; text-decoration: none; }
+  #archive .back i { color: var(--hot); }
+  #archive h3 { font: 400 1.05rem Georgia, serif; color: var(--faint); margin: 2rem 0 .5rem; }
+  #archive .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(4.6rem, 1fr)); gap: 2px 6px; }
+  #archive .grid button { text-align: left; padding: .4rem .2rem; border-bottom: 1px solid var(--rule); display: grid; }
+  #archive .grid button:hover { border-color: var(--ink); }
+  #archive .grid b { font-weight: 400; }
+  #archive .grid small { color: var(--faint); font-size: .72rem; }
+  #archive .grid button.played b { color: var(--hot); }
+  #home .past { margin: 1rem auto 0; padding: 0; list-style: none; text-align: left; font-size: .9rem; width: min(100%, 26rem); }
+  #home .past li { display: block; padding: 0; border: 0; }
+  #home .past a { display: grid; grid-template-columns: 3.4rem 1fr auto; gap: .8rem; padding: .35rem 0; color: var(--faint); text-decoration: none; border-bottom: 1px solid var(--rule); }
+  #home .past a:hover { color: var(--ink); }
+  #home .past .w { color: var(--hot); }
+
+  /* duel */
+  #duel { max-width: 980px; margin: 0 auto; padding: 18px 16px 60px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+  header .no { color: var(--faint); }
+  #clock { font: 400 clamp(2.6rem, 10vw, 4rem)/1 Georgia, serif; letter-spacing: -.02em; }
+  #share { color: var(--faint); font-size: .9rem; border-bottom: 1px dotted var(--faint); }
+  #banner { font: 400 1.5rem/1.2 Georgia, serif; margin: 1.4rem 0 .4rem; }
+  #banner b { color: var(--hot); font-weight: 400; }
+
+  #lobby { margin-top: 2.2rem; display: grid; gap: 1.6rem; }
+  #lobby .who { display: flex; flex-wrap: wrap; gap: .4rem 1.4rem; font-size: 1.3rem; }
+  #lobby .who span.me { text-decoration: underline; text-underline-offset: 4px; }
+  #lobby .who span.empty { color: var(--faint); }
+  #lobby form { display: flex; gap: 1rem; align-items: baseline; }
+  #go { font: 400 1.6rem Georgia, serif; border-bottom: 2px solid var(--hot); justify-self: start; }
+  #go[disabled] { color: var(--faint); border-color: var(--rule); cursor: default; }
+
+  input.line { background: none; border: 0; border-bottom: 1.5px solid var(--ink); padding: 4px 0; outline: none; min-width: 0; }
+  input.line::placeholder { color: var(--faint); }
+
+  #board { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2.4rem; margin-top: 1.6rem; align-items: start; }
+  #board.crowd { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); row-gap: 1.6rem; }
+  #board.crowd .side.me { grid-row: 1 / span 3; }
+  #board.crowd .side:not(.me) { font-size: .82rem; }
+  #board.crowd .side:not(.me) li.heads { display: none; }
+  #board.crowd .side:not(.me) h2 { font-size: 1.05rem; }
+  #rivals { display: none; }
+  @media (max-width: 700px) {
+    #board, #board.crowd { grid-template-columns: 1fr; gap: 2rem; margin-top: 1.2rem; }
+    #board.crowd .side.me { grid-row: auto; }
+    #board.mine .side:not(.me) { display: none; }
+    #rivals:not([hidden]) { display: block; list-style: none; margin: 1rem 0 0; padding: 0; font-size: .88rem; }
+    .rival { display: block; padding: 0; border-bottom: 1px solid var(--rule); }
+    .rival .sum { width: 100%; text-align: left; display: grid; grid-template-columns: minmax(0, 1fr) auto 4.2em 8em; gap: .7em; align-items: center; padding: .55em 0; }
+    .rival .name { font: 400 1.05rem Georgia, serif; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .rival .name::before { content: "›"; display: inline-block; width: .9em; color: var(--faint); transition: transform .15s; }
+    .rival.open .name::before { transform: rotate(90deg); }
+    .rival.first .name { color: var(--hot); }
+    .rival .stat { color: var(--faint); font-size: .9em; }
+    .rival.found .stat { color: var(--hot); }
+    .rival .s { text-align: right; }
+    .rival ol { margin: 0 0 .6em 1.1em; font-size: .92em; }
+    .rival ol li:last-child { border-bottom: 0; }
+  }
+  .side h2 { font: 400 1.25rem/1.2 Georgia, serif; margin: 0 0 .2rem; display: flex; justify-content: space-between; align-items: baseline; }
+  .side h2 .stat { font: .9rem ui-sans-serif, sans-serif; color: var(--faint); }
+  .side.found h2 .stat { color: var(--hot); }
+  .side.first h2 .name { color: var(--hot); }
+  .side form { display: flex; align-items: baseline; gap: 1rem; }
+  .giveup { font-size: .8rem; color: var(--faint); white-space: nowrap; }
+  .giveup[data-sure] { color: var(--hot); }
+  li.more { display: block; color: var(--faint); font-size: .85em; border: 0; }
+  .side form { margin: .6rem 0 .3rem; position: relative; }
+  .side form input { flex: 1; font-size: 1.15rem; }
+  .err { position: absolute; right: 0; bottom: 8px; font-size: .85rem; color: var(--hot); transition: opacity .4s; }
+
+  ol { list-style: none; margin: .5em 0 0; padding: 0; }
+  li { display: grid; grid-template-columns: 2em minmax(0, 1fr) 4.6em 8em; align-items: center; gap: .6em; padding: .32em 0; border-bottom: 1px solid var(--rule); }
+  li.heads { color: var(--faint); border-bottom-color: var(--ink); padding-top: 0; }
+  li.heads span { font-size: .75em; }
+  li.latest { border-bottom: 1.5px solid var(--ink); margin-bottom: .5em; }
+  li .n { color: var(--faint); font-size: .8em; }
+  li .w { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  li .w.hidden { filter: blur(5px); user-select: none; color: var(--faint); }
+  li .s { text-align: right; }
+  li .p { font-size: .85em; white-space: nowrap; }
+  li .p.num { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: .4em; }
+  li .p .bar { height: 6px; border-radius: 3px; background: var(--rule); overflow: hidden; }
+  li .p .bar i { display: block; height: 100%; background: var(--hot); }
+  li .p.temp { color: var(--faint); }
+  li.secret .w { color: var(--hot); }
+  li.fresh { animation: fresh 1.2s ease-out; }
+  @keyframes fresh { from { background: color-mix(in srgb, var(--hot) 14%, transparent); } }
+</style>
+</head>
+<body>
+
+<main id="home" hidden>
+  <h1>semantle <i>duel</i></h1>
+  <nav>
+    <button data-puzzle="today">today’s word</button>
+    <button data-puzzle="random" class="quiet">random</button>
+    <a href="/archive" class="quiet">archive</a>
+  </nav>
+</main>
+
+<main id="archive" hidden>
+  <a href="/" class="back">semantle <i>duel</i></a>
+  <div class="months"></div>
+</main>
+
+<main id="duel" hidden>
+  <header>
+    <div>
+      <div id="clock" class="num">0:00</div>
+      <span class="no num"></span>
+    </div>
+    <button id="share" title="copy link">copy link</button>
+  </header>
+  <div id="banner" hidden></div>
+  <section id="lobby" hidden>
+    <div class="who"></div>
+    <form id="nameform"><input class="line" id="name" placeholder="your name" maxlength="24" autocomplete="off"></form>
+    <button id="go" disabled>start</button>
+  </section>
+  <ol id="rivals" hidden></ol>
+  <section id="board" hidden></section>
+</main>
+
+<script>
+const $ = (s, el = document) => el.querySelector(s);
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+const me = store.get("sd-player") || (() => { const id = crypto.randomUUID(); store.set("sd-player", id); return id; })();
+const path = location.pathname.split("/").filter(Boolean);
+
+async function post(url, data) {
+  const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(data) });
+  return { ok: res.ok, ...(await res.json().catch(() => ({}))) };
+}
+
+/* ---------- past duels (this browser only) ---------- */
+function pastDuels() {
+  try { return JSON.parse(store.get("sd-duels")) || []; } catch { return []; }
+}
+
+// Finishers in order: found it (fastest first), then gave up.
+function standings(v) {
+  return v.players.filter((p) => p.finish).sort((a, b) => (b.finish.found - a.finish.found) || (a.finish.at - b.finish.at));
+}
+
+function remember(v) {
+  const mine = v.players.find((p) => p.id === me);
+  if (!mine) return;
+  const others = v.players.filter((p) => p.id !== me).map((p) => p.name);
+  const entry = {
+    id: v.id, number: v.number, others, status: v.status,
+    found: mine.finish?.found ?? null,
+    place: v.status === "over" && mine.finish?.found ? standings(v).indexOf(mine) + 1 : null,
+    secret: v.secret, time: mine.finish ? mine.finish.at - v.startsAt : null,
+    at: Date.now(),
+  };
+  const list = [entry, ...pastDuels().filter((d) => d.id !== v.id)].slice(0, 30);
+  store.set("sd-duels", JSON.stringify(list));
+}
+
+function pastList() {
+  const list = pastDuels().filter((d) => d.others.length);
+  if (!list.length) return null;
+  return el("ol", { class: "past" }, ...list.map((d) => el("li", {},
+    el("a", { href: `/d/${d.id}` },
+      el("span", { class: "num" }, `#${d.number}`),
+      el("span", {}, `vs ${d.others.join(", ")}`),
+      el("span", { class: d.place === 1 ? "w" : "" },
+        d.found === true ? `${d.place ? ordinal(d.place) : "found"} · ${d.secret} · ${mmss(d.time)}`
+        : d.found === false ? `gave up · ${d.secret}`
+        : d.status === "lobby" ? "not started" : "in progress"),
+    ),
+  )));
+}
+
+async function newDuel(puzzle, button) {
+  button.disabled = true;
+  const r = await post("/duels", { puzzle });
+  if (r.id) location.href = `/d/${r.id}`; else button.disabled = false;
+}
+
+/* ---------- pages ---------- */
+if (path[0] === "d") duelPage(path[1]);
+else if (path[0] === "archive") archivePage();
+else {
+  $("#home").hidden = false;
+  const past = pastList();
+  if (past) $("#home").append(past);
+  for (const b of document.querySelectorAll("#home button")) {
+    b.onclick = async () => newDuel(b.dataset.puzzle === "random" ? await randomUnplayed() : undefined, b);
+  }
+}
+
+// A past puzzle (not today's) that this browser hasn't duelled yet.
+async function randomUnplayed() {
+  const { number: today } = await (await fetch("/today")).json();
+  const played = new Set(pastDuels().map((d) => d.number));
+  const fresh = [];
+  for (let n = 1; n < today; n++) if (!played.has(n)) fresh.push(n);
+  return fresh.length ? fresh[Math.floor(Math.random() * fresh.length)] : 1 + Math.floor(Math.random() * (today - 1));
+}
+
+/* ---------- archive ---------- */
+async function archivePage() {
+  $("#archive").hidden = false;
+  const { number: today } = await (await fetch("/today")).json();
+  const played = new Set(pastDuels().map((d) => d.number));
+  const dateOf = (n) => new Date(Date.UTC(2022, 0, 29 + n - 1));
+  const months = new Map();
+  for (let n = today; n >= 1; n--) {
+    const d = dateOf(n);
+    const key = d.toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+    if (!months.has(key)) months.set(key, []);
+    const b = el("button", { class: played.has(n) ? "played" : "", title: played.has(n) ? "played" : "" },
+      el("b", { class: "num" }, `#${n}`),
+      el("small", {}, d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })));
+    b.onclick = () => newDuel(n, b);
+    months.get(key).push(b);
+  }
+  $("#archive .months").replaceChildren(...[...months].flatMap(([m, bs]) => [el("h3", {}, m), el("div", { class: "grid" }, ...bs)]));
+}
+
+/* ---------- duel ---------- */
+function duelPage(id) {
+  $("#duel").hidden = false;
+  const base = `/d/${id}`;
+  let view = null, skew = 0, seen = null, draft = "";  // seen: guesses already drawn, so only new ones flash
+  const open = new Set();  // opponents expanded on a phone
+
+  const join = (name) => post(`${base}/join`, { player: me, name });
+  const savedName = store.get("sd-name");
+  if (savedName) { $("#name").value = savedName; join(savedName); }
+
+  $("#nameform").onsubmit = (e) => {
+    e.preventDefault();
+    const name = $("#name").value.trim();
+    if (!name) return;
+    store.set("sd-name", name);
+    join(name);
+    $("#name").blur();
+  };
+  $("#name").onblur = () => $("#nameform").requestSubmit();
+  $("#go").onclick = () => post(`${base}/start`, { player: me });
+  $("#share").onclick = async () => {
+    try { await navigator.clipboard.writeText(location.href); $("#share").textContent = "copied"; }
+    catch { $("#share").textContent = location.href; }
+    setTimeout(() => ($("#share").textContent = "copy link"), 1600);
+  };
+
+  const es = new EventSource(`${base}/events?player=${encodeURIComponent(me)}`);
+  es.onmessage = (e) => {
+    view = JSON.parse(e.data);
+    skew = view.now - Date.now();
+    render();
+  };
+
+  setInterval(tick, 250);
+
+  function tick() {
+    if (!view) return;
+    const now = Date.now() + skew;
+    const c = $("#clock");
+    if (view.status === "lobby") c.textContent = "0:00";
+    else if (now < view.startsAt) c.textContent = String(Math.ceil((view.startsAt - now) / 1000));
+    else c.textContent = mmss((view.endedAt ?? now) - view.startsAt);
+    if (view.status === "countdown" && now >= view.startsAt) { view.status = "playing"; render(); }
+  }
+
+  function render() {
+    const v = view;
+    remember(v);
+    $(".no").textContent = `#${v.number}`;
+    const inIt = v.players.some((p) => p.id === me);
+    const lobby = v.status === "lobby";
+
+    $("#lobby").hidden = !lobby;
+    $("#share").hidden = !lobby;
+    if (lobby) {
+      const who = $("#lobby .who");
+      who.replaceChildren(...v.players.map((p) => el("span", { class: p.id === me ? "me" : "" }, p.name)));
+      if (v.players.length < v.max) who.append(el("span", { class: "empty" }, "…"));
+      $("#nameform").hidden = !inIt && v.players.length >= v.max;
+      $("#go").disabled = !(inIt && v.players.length >= 2);
+    }
+
+    // your own result, once you have one
+    const mine = v.players.find((p) => p.id === me);
+    const banner = $("#banner");
+    banner.hidden = !mine?.finish;
+    if (mine?.finish) {
+      const n = mine.guesses.length;
+      banner.replaceChildren(...(mine.finish.found
+        ? ["you found ", el("b", {}, v.secret), " in ", el("span", { class: "num" }, `${n}`), n === 1 ? " guess" : " guesses"]
+        : ["you gave up. it was ", el("b", {}, v.secret)]));
+    }
+
+    const board = $("#board");
+    board.hidden = lobby;
+    if (lobby) return;
+    // you first; opponents after, by standing once they finish
+    const order = standings(v);
+    const rank = (p) => (p.id === me ? -1 : p.finish ? order.indexOf(p) : 99);
+    const sides = [...v.players].sort((a, b) => rank(a) - rank(b));
+    board.classList.toggle("crowd", sides.length > 2);
+    board.classList.toggle("mine", inIt);
+    const focused = document.activeElement?.id === "guess";
+    board.replaceChildren(...sides.map((p) => side(p, v)));
+    const rivals = $("#rivals");
+    rivals.hidden = !inIt;
+    rivals.replaceChildren(...sides.filter((p) => p.id !== me).map((p) => rival(p, v)));
+    seen = new Set(v.players.flatMap((p) => p.guesses.map((g) => `${p.id}:${g.n}`)));
+    if (focused || (v.status === "playing" && inIt && !matchMedia("(hover: none)").matches)) $("#guess")?.focus();
+  }
+
+  function side(p, v) {
+    const mine = p.id === me;
+    const best = p.guesses.reduce((m, g) => Math.max(m, g.score), -Infinity);
+    const n = p.guesses.length;
+    const f = p.finish;
+    const place = f?.found ? standings(v).indexOf(p) + 1 : 0;
+    const div = el("div", { class: "side" + (mine ? " me" : "") + (f?.found ? " found" : "") + (place === 1 ? " first" : "") });
+    div.append(el("h2", {},
+      el("span", { class: "name" }, mine ? "you" : p.name),
+      el("span", { class: "stat num" },
+        f?.found ? `${ordinal(place)} · ${mmss(f.at - v.startsAt)} · ${n}`
+        : f ? `gave up · ${n}`
+        : n ? `${n} · ${best.toFixed(2)}` : ""),
+    ));
+
+    if (mine && v.status === "playing" && !f) {
+      const form = el("form", {});
+      const input = el("input", { class: "line", id: "guess", autocomplete: "off", autocapitalize: "off", spellcheck: "false", enterkeyhint: "go" });
+      input.value = draft;
+      input.oninput = () => (draft = input.value);
+      const err = el("span", { class: "err" });
+      const quit = el("button", { class: "giveup", type: "button" }, "give up");
+      quit.onclick = () => {
+        if (quit.dataset.sure) return post(`${base}/giveup`, { player: me });
+        quit.dataset.sure = 1; quit.textContent = "sure?";
+        setTimeout(() => { delete quit.dataset.sure; quit.textContent = "give up"; }, 2500);
+      };
+      form.append(input, err, quit);
+      form.onsubmit = async (e) => {
+        e.preventDefault();
+        const word = input.value.trim().toLowerCase();
+        if (!word) return;
+        draft = ""; input.value = "";
+        const r = await post(`${base}/guess`, { player: me, word });
+        if (!r.ok) {
+          const e2 = $("#board .err");
+          if (e2) { e2.textContent = `${word}: ${r.error}`; e2.style.opacity = 1; setTimeout(() => (e2.style.opacity = 0), 1800); }
+        }
+      };
+      div.append(form);
+    }
+
+    const ol = el("ol", {});
+    if (p.guesses.length) ol.append(heads());
+    const last = p.guesses.at(-1);
+    let sorted = [...p.guesses].sort((a, b) => b.score - a.score);
+    // a crowded table keeps opponents short until the end
+    const cap = !mine && v.players.length > 2 && v.status !== "over" ? 8 : Infinity;
+    const more = sorted.length - cap;
+    sorted = sorted.slice(0, cap);
+    if (last && p.guesses.length > 1) ol.append(row(last, p, v, true));
+    for (const g of sorted) ol.append(row(g, p, v, false));
+    if (more > 0) ol.append(el("li", { class: "more" }, `+${more}`));
+    div.append(ol);
+    return div;
+  }
+
+  // phone: one line per opponent, tap to open their list
+  function rival(p, v) {
+    const f = p.finish, n = p.guesses.length;
+    const best = p.guesses.reduce((b, g) => (!b || g.score > b.score ? g : b), null);
+    const last = p.guesses.at(-1);
+    const fresh = last && seen !== null && !seen.has(`${p.id}:${last.n}`);
+    const place = f?.found ? standings(v).indexOf(p) + 1 : 0;
+    const li = el("li", { class: ["rival", open.has(p.id) && "open", fresh && "fresh", place === 1 && "first", f?.found && "found"].filter(Boolean).join(" ") });
+    const sum = el("button", { class: "sum", type: "button" },
+      el("span", { class: "name" }, p.name),
+      el("span", { class: "stat num" }, f?.found ? `${ordinal(place)} · ${mmss(f.at - v.startsAt)} · ${n}` : f ? `gave up · ${n}` : n),
+      el("span", { class: "s num", style: best ? `color:${heat(best)}` : "" }, best ? best.score.toFixed(2) : ""),
+      best ? proximity(best) : el("span", {}),
+    );
+    sum.onclick = () => { open.has(p.id) ? open.delete(p.id) : open.add(p.id); render(); };
+    li.append(sum);
+    if (open.has(p.id)) {
+      const ol = el("ol", {});
+      if (last && n > 1) ol.append(row(last, p, v, true));
+      for (const g of [...p.guesses].sort((a, b) => b.score - a.score)) ol.append(row(g, p, v, false));
+      li.append(ol);
+    }
+    return li;
+  }
+
+  function row(g, p, v, isLatest) {
+    const fresh = (isLatest || p.guesses.length === 1) && seen !== null && !seen.has(`${p.id}:${g.n}`);
+    const li = el("li", { class: [isLatest && "latest", fresh && "fresh", v.secret && g.word === v.secret && "secret"].filter(Boolean).join(" ") });
+    const word = g.word ?? "x".repeat(4 + ((g.n * 7 + p.id.charCodeAt(0)) % 6));
+    li.append(
+      el("span", { class: "n num" }, g.n),
+      el("span", { class: "w" + (g.word ? "" : " hidden") }, word),
+      el("span", { class: "s num", style: `color:${heat(g)}` }, g.score.toFixed(2)),
+      proximity(g),
+    );
+    return li;
+  }
+}
+
+// Semantle's proximity column: rank out of 1000 with a bar, or a temperature word.
+function proximity(g) {
+  if (g.rank === 1000) return el("span", { class: "p found" }, "🔥🎉");
+  if (g.rank) {
+    const p = el("span", { class: "p num" }, el("span", {}, `${g.rank}/1000`), el("span", { class: "bar" }, el("i", { style: `width:${g.rank / 10}%;background:hsl(${Math.round((g.rank / 1000) * 125)} 68% 46%)` })));
+    return p;
+  }
+  return el("span", { class: "p temp" }, g.score < 0 ? "(far)" : g.score < 20 ? "(cold)" : "(tepid)");
+}
+
+function heat(g) {
+  if (g.rank) return "var(--hot)";
+  if (g.score >= 20) return "var(--warm)";
+  return "var(--faint)";
+}
+
+function heads() {
+  return el("li", { class: "heads" }, el("span", {}, "#"), el("span", {}, "Guess"), el("span", { class: "s" }, "Similarity"), el("span", {}, "Proximity"));
+}
+
+function ordinal(n) {
+  return n + (["th", "st", "nd", "rd"][n] ?? "th");
+}
+
+function mmss(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
+  return (h ? `${h}:${String(m).padStart(2, "0")}` : `${m}`) + `:${String(r).padStart(2, "0")}`;
+}
+
+function el(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) if (v !== "" && v != null) e.setAttribute(k, v);
+  e.append(...kids.map((k) => (typeof k === "number" ? String(k) : k)));
+  return e;
+}
+</script>
+</body>
+</html>
