@@ -36,11 +36,11 @@
   .roll { position: relative; display: inline-block; vertical-align: bottom; height: 1.2em; margin-bottom: -.12em; perspective: 4em; text-align: left; }
   .roll > span { position: absolute; left: 0; bottom: .12em; white-space: nowrap; font-style: italic; color: var(--hot); backface-visibility: hidden; transform-origin: 50% 50% -.4em; }
   .roll > span.won small { color: var(--hot); }
-  .roll > span small { position: absolute; right: 0; top: 100%; margin-top: .05em; font: 400 .8rem/1 var(--serif); font-style: normal; color: var(--faint); font-variant-numeric: tabular-nums; letter-spacing: 0; }
+  .roll > span small { position: absolute; right: -.9em; top: 100%; margin-top: .05em; font: 400 .8rem/1 var(--serif); font-style: normal; color: var(--faint); font-variant-numeric: tabular-nums; letter-spacing: 0; }
   .roll > span.in { animation: flipin .5s cubic-bezier(.3,.7,.2,1) both; }
   .roll > span.out { animation: flipout .5s cubic-bezier(.5,0,.8,.4) both; }
   .roll > span.swipe { animation: swipe .7s cubic-bezier(.2,.8,.2,1) both; }
-  #home h1 .lead { display: inline-block; animation: swipe .8s cubic-bezier(.2,.8,.2,1) both; }
+  #home h1 .lead { display: inline-block; animation: swipe .8s cubic-bezier(.2,.8,.2,1) .5s both; }
   @keyframes flipin { from { transform: rotateX(90deg); opacity: 0; } }
   @keyframes flipout { to { transform: rotateX(-90deg); opacity: 0; } }
   @keyframes swipe { from { clip-path: inset(-.5em 100% -.5em 0); transform: translateX(.6em); opacity: 0; } to { clip-path: inset(-.5em -1em -.5em 0); } }
@@ -389,7 +389,7 @@ async function rollTitle() {
     else old?.remove();
     return span;
   };
-  if (!rolled) await wait(900);  // "semantle" sweeps in first, on load only
+  if (!rolled) await wait(1400);  // "semantle" sweeps in first, on load only
   rolled = true;
   show(card("…"), "swipe");
   await wait(1100);
