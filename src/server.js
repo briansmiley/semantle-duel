@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import { Duel, DuelError } from "./duel.js";
 import * as semantle from "./semantle.js";
 import * as vectors from "./vectors.js";
+import { feedback } from "./feedback.js";
 
 const PORT = Number(process.env.PORT ?? 8080);
 const HOST = process.env.HOST ?? "127.0.0.1";
@@ -16,6 +17,7 @@ await mkdir(DATA, { recursive: true });
 const rooms = new Map();
 
 const fileOf = (id) => `${DATA}/${id}.json`;
+const receiveFeedback = feedback({ dir: `${DATA}/feedback` });
 
 // One write at a time per duel: two guesses landing together used to race on
 // the same .tmp file, and the loser's request failed after its guess counted.
@@ -87,11 +89,11 @@ function send(res, view) {
   res.write(`data: ${JSON.stringify(view)}\n\n`);
 }
 
-async function body(req) {
+async function body(req, limit = 4096) {
   let s = "";
   for await (const chunk of req) {
     s += chunk;
-    if (s.length > 4096) throw new DuelError("too large");
+    if (s.length > limit) throw new DuelError("too large");
   }
   return s ? JSON.parse(s) : {};
 }
@@ -120,6 +122,12 @@ async function handle(req, res) {
   if (req.method === "GET" && (parts.length === 0 || url.pathname === "/archive" || (parts[0] === "d" && parts.length === 2))) {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     return res.end(await readFile(PAGE));
+  }
+
+  if (req.method === "POST" && url.pathname === "/feedback") {
+    const address = String(req.headers["fly-client-ip"] ?? req.socket.remoteAddress);
+    const [code, out] = await receiveFeedback(await body(req, 16_384), address);
+    return json(res, code, out);
   }
 
   if (req.method === "POST" && url.pathname === "/duels") {
