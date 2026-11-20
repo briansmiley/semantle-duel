@@ -5,7 +5,9 @@
 const COUNTDOWN_MS = 3000;
 export const MAX_PLAYERS = 4;
 const ABANDON_MS = 24 * 3600_000; // a started duel with no moves this long ends
-export const AWAY_MS = Number(process.env.AWAY_MS ?? 30_000); // no sign of life from anyone still playing this long: the clock stops
+// No sign of life from anyone still playing this long: the clock stops (as of when they were last heard).
+// Long enough to ride out a background tab's throttled timers (Chrome: once a minute).
+export const AWAY_MS = Number(process.env.AWAY_MS ?? 90_000);
 
 /** @typedef {{n:number, word:string, score:number, rank:number|null, at:number}} Guess */
 /** @typedef {{at:number, found:boolean}} Finish */

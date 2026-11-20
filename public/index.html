@@ -390,9 +390,10 @@ function duelPage(id) {
   setInterval(() => Date.now() - heard > 40_000 && connect(), 5_000);
   document.addEventListener("visibilitychange", () => !document.hidden && Date.now() - heard > 20_000 && connect());
 
-  // tell the server we're still here, so it can stop the clock once everyone racing has left
+  // tell the server we're still here (even from a background tab), so it can stop the
+  // clock once everyone racing has actually disconnected
   const racing = () => view?.status === "playing" && view.players.some((p) => p.id === me && !p.finish);
-  const here = () => racing() && !document.hidden && post(`${base}/here`, { player: me });
+  const here = () => racing() && post(`${base}/here`, { player: me });
   setInterval(here, 10_000);
   document.addEventListener("visibilitychange", here);
 
