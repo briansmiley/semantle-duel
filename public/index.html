@@ -68,6 +68,12 @@
   #duel { max-width: 980px; margin: 0 auto; padding: 18px 16px 60px; }
   header { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
   header .no { color: var(--faint); }
+  #clock.stopped { color: var(--faint); }
+  #pausebar { color: var(--faint); font-size: .95rem; margin-left: .5em; }
+  #pausebar button { color: var(--ink); border-bottom: 1px solid currentColor; margin-left: .3em; }
+  #board.paused .side.me ol, #board.paused #guess { filter: blur(6px); pointer-events: none; }
+  .side form .submit { font-size: 1.05rem; border-bottom: 2px solid var(--hot); padding-bottom: 1px; }
+  .side form .submit:disabled { color: var(--faint); border-color: var(--rule); cursor: default; }
   #clock { font: 400 clamp(2.6rem, 10vw, 4rem)/1 var(--serif); letter-spacing: -.02em; }
   #share { color: var(--faint); font-size: .9rem; border-bottom: 1px dotted var(--faint); }
   #banner { font: 400 1.5rem/1.2 var(--serif); margin: 1.4rem 0 .4rem; }
@@ -173,7 +179,7 @@
   <header>
     <div>
       <div id="clock" class="num">0:00</div>
-      <span class="no num"></span>
+      <span class="no num"></span><span id="pausebar"></span>
     </div>
     <button id="share" title="copy link">copy link</button>
   </header>
@@ -225,7 +231,7 @@ function remember(v) {
     id: v.id, number: v.number, others, status: v.status,
     found: mine.finish?.found ?? null,
     place: v.status === "over" && mine.finish?.found ? standings(v).indexOf(mine) + 1 : null,
-    secret: v.secret, time: mine.finish ? mine.finish.at - v.startsAt : null,
+    secret: v.secret, time: mine.finish?.time ?? null,
     at: Date.now(),
   };
   const list = [entry, ...pastDuels().filter((d) => d.id !== v.id)].slice(0, 30);
@@ -384,6 +390,12 @@ function duelPage(id) {
   setInterval(() => Date.now() - heard > 40_000 && connect(), 5_000);
   document.addEventListener("visibilitychange", () => !document.hidden && Date.now() - heard > 20_000 && connect());
 
+  // tell the server we're still here, so it can stop the clock once everyone racing has left
+  const racing = () => view?.status === "playing" && view.players.some((p) => p.id === me && !p.finish);
+  const here = () => racing() && !document.hidden && post(`${base}/here`, { player: me });
+  setInterval(here, 10_000);
+  document.addEventListener("visibilitychange", here);
+
   function apply(v) {
     if (view && v.now < view.now) return;  // an older snapshot arriving late
     view = v;
@@ -399,7 +411,7 @@ function duelPage(id) {
     const c = $("#clock");
     if (view.status === "lobby") c.textContent = "0:00";
     else if (now < view.startsAt) c.textContent = String(Math.ceil((view.startsAt - now) / 1000));
-    else c.textContent = mmss((view.endedAt ?? now) - view.startsAt);
+    else c.textContent = mmss(view.elapsed + (view.status === "playing" && !view.paused ? now - Math.max(view.now, view.startsAt) : 0));
     if (view.status === "countdown" && now >= view.startsAt) { view.status = "playing"; render(); }
   }
 
@@ -431,6 +443,7 @@ function duelPage(id) {
         : ["you gave up. it was ", el("b", {}, v.secret)]));
     }
     after(v, mine);
+    pausebar(v, mine);
 
     const board = $("#board");
     board.hidden = lobby;
@@ -449,6 +462,22 @@ function duelPage(id) {
     seen = new Set(v.players.flatMap((p) => p.guesses.map((g) => `${p.id}:${g.n}`)));
     flashRecall = false;
     if (focused || (v.status === "playing" && inIt && !matchMedia("(hover: none)").matches)) $("#guess")?.focus();
+  }
+
+  function pausebar(v, mine) {
+    const bar = $("#pausebar");
+    const racer = mine && !mine.finish && v.status === "playing";
+    $("#clock").classList.toggle("stopped", !!v.paused);
+    $("#board").classList.toggle("paused", !!(v.paused && racer));
+    const toggle = (label, paused) => {
+      const b = el("button", { type: "button" }, label);
+      b.onclick = () => post(`${base}/pause`, { player: me, paused }).then((r) => r.view && apply(r.view));
+      return b;
+    };
+    const by = v.paused?.by && v.players.find((p) => p.id === v.paused.by);
+    const kids = !v.paused ? (racer ? ["·", toggle("pause", true)] : [])
+      : [`· ${!by ? "paused while away" : by.id === me ? "paused" : `${by.name} paused`}`, racer ? toggle("resume", false) : ""];
+    bar.replaceChildren(...kids);
   }
 
   // once you're done: rematch (same opponents, a puzzle of your choosing) or home
@@ -489,7 +518,7 @@ function duelPage(id) {
     div.append(el("h2", {},
       el("span", { class: "name" }, mine ? "you" : p.name),
       el("span", { class: "stat num" },
-        f?.found ? `${ordinal(place)} · ${mmss(f.at - v.startsAt)} · ${n}`
+        f?.found ? `${ordinal(place)} · ${mmss(f.time)} · ${n}`
         : f ? `gave up · ${n}`
         : n ? `${n} · ${best.toFixed(2)}` : ""),
     ));
@@ -505,7 +534,10 @@ function duelPage(id) {
         quit.dataset.sure = 1; quit.textContent = "sure?";
         setTimeout(() => { delete quit.dataset.sure; quit.textContent = "give up"; }, 2500);
       };
-      form.append(input, quit);
+      const submit = el("button", { class: "submit", type: "submit" }, "guess");
+      submit.onpointerdown = (e) => e.preventDefault();  // keep the keyboard up on phones
+      if (v.paused) { input.disabled = true; submit.disabled = true; }
+      form.append(input, submit, quit);
       form.onsubmit = async (e) => {
         e.preventDefault();
         const word = input.value.trim().toLowerCase();
@@ -561,7 +593,7 @@ function duelPage(id) {
     const li = el("li", { class: ["rival", open.has(p.id) && "open", fresh && "fresh", place === 1 && "first", f?.found && "found"].filter(Boolean).join(" ") });
     const sum = el("button", { class: "sum", type: "button" },
       el("span", { class: "name" }, p.name),
-      el("span", { class: "stat num" }, f?.found ? `${ordinal(place)} · ${mmss(f.at - v.startsAt)} · ${n}` : f ? `gave up · ${n}` : n),
+      el("span", { class: "stat num" }, f?.found ? `${ordinal(place)} · ${mmss(f.time)} · ${n}` : f ? `gave up · ${n}` : n),
       el("span", { class: "s num", style: best ? `color:${heat(best)}` : "" }, best ? best.score.toFixed(2) : ""),
       best ? proximity(best) : el("span", {}),
     );

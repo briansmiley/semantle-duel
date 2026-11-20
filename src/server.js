@@ -34,7 +34,9 @@ function save(duel) {
 
 async function loadRoom(id) {
   const room = await findRoom(id);
-  if (room?.duel.expire(Date.now())) await save(room.duel);
+  const now = Date.now();
+  // also catches up on what happened while nobody had it open (or the machine was asleep)
+  if (room && (room.duel.expire(now) | room.duel.checkAway(now))) await save(room.duel);
   return room;
 }
 
@@ -136,6 +138,7 @@ async function handle(req, res) {
     res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
     const l = { player, res };
     room.listeners.add(l);
+    if (duel.touch(player, Date.now())) { await save(duel); broadcast(room); }
     send(res, duel.viewFor(player, Date.now()));
     // a named event (not a comment) so the page can tell a dead stream from a quiet one
     const ping = setInterval(() => res.write("event: ping\ndata: \n\n"), 15_000);
@@ -147,8 +150,19 @@ async function handle(req, res) {
   const msg = await body(req);
   const player = String(msg.player ?? "");
   const now = Date.now();
+  const resumed = duel.touch(player, now);
 
-  if (action === "join") {
+  // heartbeat from an open page: only worth a broadcast if it ended an away-pause
+  if (action === "here" && !resumed) {
+    if (now - (room.seenSaved ?? 0) > 20_000) { room.seenSaved = now; await save(duel); }
+    return json(res, 200, { ok: true });
+  }
+
+  if (action === "here") {
+    // resumed; saved and broadcast below
+  } else if (action === "pause") {
+    duel.setPaused(player, !!msg.paused, now);
+  } else if (action === "join") {
     duel.join(player, msg.name, now);
   } else if (action === "giveup") {
     duel.giveUp(player, now);
@@ -179,6 +193,12 @@ async function handle(req, res) {
   // the caller's own view comes back too, so a stalled event stream can't strand them
   return json(res, 200, { ok: true, view: duel.viewFor(player, Date.now()) });
 }
+
+// Stop the clock in duels where everyone still playing has gone quiet.
+setInterval(() => {
+  const now = Date.now();
+  for (const room of rooms.values()) if (room.duel.checkAway(now)) save(room.duel).then(() => broadcast(room), console.error);
+}, 5_000).unref();
 
 // Drop idle duels from memory; they stay on disk.
 setInterval(() => {

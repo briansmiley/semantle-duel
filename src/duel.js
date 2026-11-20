@@ -5,9 +5,11 @@
 const COUNTDOWN_MS = 3000;
 export const MAX_PLAYERS = 4;
 const ABANDON_MS = 24 * 3600_000; // a started duel with no moves this long ends
+export const AWAY_MS = Number(process.env.AWAY_MS ?? 30_000); // no sign of life from anyone still playing this long: the clock stops
 
 /** @typedef {{n:number, word:string, score:number, rank:number|null, at:number}} Guess */
 /** @typedef {{at:number, found:boolean}} Finish */
+/** @typedef {{from:number, to:number|null, by:string|null}} Pause  by: who pressed pause, or null when everyone left */
 /** @typedef {{id:string, name:string, guesses:Guess[], finish:Finish|null}} Player */
 
 export class Duel {
@@ -20,6 +22,59 @@ export class Duel {
     /** @type {number|null} */ this.startsAt = null;
     this.createdAt = now;
     /** @type {string|null} the rematch duel, once someone asks for one */ this.next = null;
+    /** @type {Pause[]} */ this.pauses = [];
+    /** @type {Record<string, number>} when each player was last heard from */ this.seen = {};
+  }
+
+  /** The open pause, if the clock is stopped. */
+  pause() {
+    const last = this.pauses.at(-1);
+    return last && last.to === null ? last : null;
+  }
+
+  /** Clock time at wall time t: time since the start, less any paused time. */
+  elapsed(t) {
+    if (this.startsAt === null) return 0;
+    let ms = t - this.startsAt;
+    for (const p of this.pauses) ms -= Math.max(0, Math.min(p.to ?? t, t) - Math.max(p.from, this.startsAt));
+    return Math.max(0, ms);
+  }
+
+  /** Still racing: started, not over, and not yet finished themselves. */
+  racing(playerId, now) {
+    const p = this.players.get(playerId);
+    return !!p && !p.finish && this.status(now) === "playing";
+  }
+
+  lastHeard(p) {
+    return Math.max(this.startsAt ?? 0, this.seen[p.id] ?? 0, p.guesses.at(-1)?.at ?? 0);
+  }
+
+  /** A player showed signs of life. Ends a pause that started because everyone had left. Returns true if it changed anything visible. */
+  touch(playerId, now) {
+    if (!this.players.has(playerId)) return false;
+    this.seen[playerId] = now;
+    const open = this.pause();
+    if (!open || open.by !== null || !this.racing(playerId, now)) return false;
+    open.to = now;
+    return true;
+  }
+
+  /** Stop the clock if everyone still racing has gone quiet, as of when the last of them was heard. Returns true if it did. */
+  checkAway(now) {
+    if (this.status(now) !== "playing" || this.pause()) return false;
+    const racing = [...this.players.values()].filter((p) => !p.finish);
+    const last = Math.max(...racing.map((p) => this.lastHeard(p)));
+    if (now - last < AWAY_MS) return false;
+    this.pauses.push({ from: last, to: null, by: null });
+    return true;
+  }
+
+  setPaused(playerId, paused, now) {
+    if (!this.racing(playerId, now)) throw new DuelError("not playing");
+    const open = this.pause();
+    if (paused && !open) this.pauses.push({ from: now, to: null, by: playerId });
+    if (!paused && open) open.to = now;
   }
 
   /** @returns {"lobby"|"countdown"|"playing"|"over"} */
@@ -36,7 +91,7 @@ export class Duel {
 
   /** End an abandoned duel: anyone still playing gives up as of the last move. Returns true if it did. */
   expire(now) {
-    if (this.status(now) !== "playing") return false;
+    if (this.status(now) !== "playing" || this.pause()) return false;
     const ps = [...this.players.values()];
     const last = Math.max(this.startsAt, ...ps.flatMap((p) => [p.finish?.at ?? 0, ...p.guesses.map((g) => g.at)]));
     if (now - last < ABANDON_MS) return false;
@@ -64,6 +119,7 @@ export class Duel {
     const p = this.players.get(playerId);
     if (!p) return "not in this duel";
     if (this.status(now) !== "playing" || p.finish) return "not playing";
+    if (this.pause()) return "paused";
     if (!/^[a-z][a-z'-]*$/.test(word)) return "not a word";
     if (p.guesses.some((g) => g.word === word)) return "already guessed";
     return null;
@@ -82,12 +138,16 @@ export class Duel {
     const p = this.players.get(playerId);
     if (!p || p.finish || this.status(now) !== "playing") throw new DuelError("not playing");
     p.finish = { at: now, found: false };
+    const open = this.pause();
+    if (open && [...this.players.values()].every((q) => q.finish)) open.to = now;
   }
 
   /** What one viewer may see: everything once they've finished (or it's over), otherwise only scores of others. */
   viewFor(viewerId, now) {
     const status = this.status(now);
     const reveal = status === "over" || !!this.players.get(viewerId)?.finish;
+    const ended = status === "over" ? this.endedAt() : now;
+    const open = this.pause();
     return {
       id: this.id,
       number: this.puzzle.number,
@@ -95,6 +155,8 @@ export class Duel {
       now,
       startsAt: this.startsAt,
       endedAt: status === "over" ? this.endedAt() : null,
+      elapsed: this.elapsed(ended),  // the clock as of `now`; it runs on from here unless paused or over
+      paused: open ? { by: open.by, from: open.from } : null,
       secret: reveal ? this.puzzle.secret : null,
       max: MAX_PLAYERS,
       next: this.next,
@@ -102,7 +164,7 @@ export class Duel {
       players: [...this.players.values()].map((p) => ({
         id: p.id,
         name: p.name,
-        finish: p.finish,
+        finish: p.finish && { ...p.finish, time: this.elapsed(p.finish.at) },
         guesses: p.guesses.map((g) => ({
           n: g.n,
           word: reveal || p.id === viewerId ? g.word : null,
@@ -115,7 +177,7 @@ export class Duel {
   }
 
   toJSON() {
-    return { id: this.id, puzzle: this.puzzle, players: [...this.players.values()], startsAt: this.startsAt, createdAt: this.createdAt, next: this.next };
+    return { id: this.id, puzzle: this.puzzle, players: [...this.players.values()], startsAt: this.startsAt, createdAt: this.createdAt, next: this.next, pauses: this.pauses, seen: this.seen };
   }
 
   static fromJSON(o) {
@@ -123,6 +185,8 @@ export class Duel {
     for (const p of o.players) d.players.set(p.id, { finish: null, ...p });
     d.startsAt = o.startsAt;
     d.next = o.next ?? null;
+    d.pauses = o.pauses ?? [];
+    d.seen = o.seen ?? {};
     // duels saved before players finished separately: the winner had found it
     if (o.won) {
       const w = d.players.get(o.won.player);
