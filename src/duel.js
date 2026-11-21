@@ -1,9 +1,9 @@
-// A duel: up to four people racing at the same Semantle puzzle on one clock.
+// A duel: up to eight people racing at the same Semantle puzzle on one clock.
 // Each player finishes on their own (found it, or gave up); finding the word
 // doesn't stop anyone else. The duel is over once everyone has finished.
 
 const COUNTDOWN_MS = 3000;
-export const MAX_PLAYERS = 4;
+export const MAX_PLAYERS = 8;
 const ABANDON_MS = 24 * 3600_000; // a started duel with no moves this long ends
 // No sign of life from anyone still playing this long: the clock stops (as of when they were last heard).
 // Long enough to ride out a background tab's throttled timers (Chrome: once a minute).
