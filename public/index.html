@@ -92,6 +92,10 @@
   #voice .who .talking { color: var(--hot); }
   #voice .who .muted, #voice .who .off { color: var(--faint); }
   #voice .err { color: var(--hot); font-style: italic; }
+  #watch { margin-top: 1rem; display: flex; flex-wrap: wrap; align-items: baseline; gap: .4rem 1rem; font-size: 1.1rem; }
+  #watch span { color: var(--faint); font-style: italic; }
+  #watch input { width: 9em; }
+  #watch .go { border-bottom: 2px solid var(--hot); padding-bottom: 1px; }
   #share { color: var(--faint); font-size: 1rem; border-bottom: 1px dotted var(--faint); }
   #banner { font: 400 1.5rem/1.2 var(--serif); margin: 1.4rem 0 .4rem; }
   #banner b { color: var(--hot); font-weight: 400; }
@@ -253,6 +257,7 @@
     <button id="share" title="copy link">copy link</button>
   </header>
   <div id="voice" hidden></div>
+  <form id="watch" hidden><span>you’re watching.</span><input class="line" id="latename" placeholder="your name" maxlength="24" autocomplete="off"><button class="go">join in</button></form>
   <div id="banner" hidden></div>
   <nav id="after" hidden></nav>
   <section id="lobby" hidden>
@@ -758,7 +763,18 @@ function duelPage(id) {
 
   const join = (name) => post(`${base}/join`, { player: me, name });
   const savedName = store.get("sd-name");
-  if (savedName) { $("#name").value = savedName; join(savedName); }
+  // Joined on the first view: in the lobby, or to refresh your name if you're already in. Mid-game you start out watching.
+  let greeted = false;
+  if (savedName) { $("#name").value = savedName; $("#latename").value = savedName; }
+  $("#watch").onsubmit = async (e) => {
+    e.preventDefault();
+    const name = $("#latename").value.trim();
+    if (!name) return $("#latename").focus();
+    store.set("sd-name", name);
+    $("#name").value = name;
+    const r = await join(name);
+    if (r.view) apply(r.view);
+  };
   // your name in the lobby list is its own input: shown, with a pencil, or being edited
   let editing = !savedName;
   const showMine = () => {
@@ -844,6 +860,10 @@ function duelPage(id) {
 
   function render() {
     const v = view;
+    if (!greeted) {
+      greeted = true;
+      if (savedName && (v.status === "lobby" || v.players.some((p) => p.id === me))) join(savedName);
+    }
     remember(v);
     $(".no").textContent = `#${v.number}${v.number === today ? " (today)" : ""}`;
     // semantle.com's archive only has past puzzles; today's is its front page
@@ -852,6 +872,7 @@ function duelPage(id) {
     const lobby = v.status === "lobby";
 
     $("#lobby").hidden = !lobby;
+    $("#watch").hidden = inIt || lobby || v.status === "over" || v.players.length >= v.max;
     $("#share").hidden = !lobby;
     if (lobby) {
       // you first (your entry is kept, not redrawn, so typing in it isn't interrupted), then everyone else
