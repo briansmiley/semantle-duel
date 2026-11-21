@@ -12,7 +12,7 @@ export const AWAY_MS = Number(process.env.AWAY_MS ?? 90_000);
 /** @typedef {{n:number, word:string, score:number, rank:number|null, at:number}} Guess */
 /** @typedef {{at:number, found:boolean}} Finish */
 /** @typedef {{from:number, to:number|null, by:string|null}} Pause  by: who pressed pause, or null when everyone left */
-/** @typedef {{id:string, name:string, guesses:Guess[], finish:Finish|null}} Player */
+/** @typedef {{id:string, name:string, guesses:Guess[], finish:Finish|null, ready?:boolean}} Player  ready: in the lobby, said they are set to go */
 
 export class Duel {
   /** @param {string} id @param {{number:number, secret:string, closest:number, tenth:number, thousandth:number}} puzzle */
@@ -116,6 +116,17 @@ export class Duel {
     this.startsAt = now + COUNTDOWN_MS;
   }
 
+  /** Ready (or not) in the lobby. Once everyone (two or more) is ready the countdown starts; returns true if it did. */
+  setReady(playerId, ready, now) {
+    const p = this.players.get(playerId);
+    if (!p) throw new DuelError("not in this duel");
+    if (this.status(now) !== "lobby") throw new DuelError("already started");
+    p.ready = ready;
+    if (this.players.size < 2 || ![...this.players.values()].every((q) => q.ready)) return false;
+    this.start(now);
+    return true;
+  }
+
   /** Why this player can't guess this word right now, or null if they can. */
   refusal(playerId, word, now) {
     const p = this.players.get(playerId);
@@ -166,6 +177,7 @@ export class Duel {
       players: [...this.players.values()].map((p) => ({
         id: p.id,
         name: p.name,
+        ready: !!p.ready,
         finish: p.finish && { ...p.finish, time: this.elapsed(p.finish.at) },
         guesses: p.guesses.map((g) => ({
           n: g.n,

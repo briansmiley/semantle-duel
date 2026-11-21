@@ -13,7 +13,7 @@ const DATA = process.env.DATA_DIR ?? new URL("../data", import.meta.url).pathnam
 await mkdir(DATA, { recursive: true });
 
 /** Live duels. Every duel is also on disk, so links outlive the process. */
-/** @type {Map<string, {duel: Duel, listeners: Set<{player:string, res:http.ServerResponse}>, scores: Map<string, any>}>} */
+/** @type {Map<string, {duel: Duel, listeners: Set<{player:string, res:http.ServerResponse}>, scores: Map<string, any>, voice: Map<string, {muted:boolean}>}>} */
 const rooms = new Map();
 
 const fileOf = (id) => `${DATA}/${id}.json`;
@@ -47,7 +47,7 @@ async function findRoom(id) {
   if (!/^[a-z0-9]{5}$/.test(id)) return null;
   let raw;
   try { raw = await readFile(fileOf(id), "utf8"); } catch { return null; }
-  if (!rooms.has(id)) rooms.set(id, { duel: Duel.fromJSON(JSON.parse(raw)), listeners: new Set(), scores: new Map() });
+  if (!rooms.has(id)) rooms.set(id, { duel: Duel.fromJSON(JSON.parse(raw)), listeners: new Set(), scores: new Map(), voice: new Map() });
   return rooms.get(id);
 }
 const puzzles = new Map(); // number -> puzzle, so a busy day costs one fetch
@@ -80,9 +80,16 @@ function newId() {
   return randomBytes(4).toString("base64url").replace(/[-_]/g, "x").slice(0, 5).toLowerCase();
 }
 
+// Voice chat: an audio-only WebRTC mesh between the duel's players who joined it. Who is in it lives
+// here (not saved): it goes out with every view, and the offers, answers and ICE candidates
+// between two of them are passed along the event stream, the sender stamped by us, never read.
+function viewOf(room, player, now) {
+  return { ...room.duel.viewFor(player, now), voice: [...room.voice].map(([id, v]) => ({ id, muted: v.muted })) };
+}
+
 function broadcast(room) {
   const now = Date.now();
-  for (const l of room.listeners) send(l.res, room.duel.viewFor(l.player, now));
+  for (const l of room.listeners) send(l.res, viewOf(room, l.player, now));
 }
 
 function send(res, view) {
@@ -108,7 +115,7 @@ async function createDuel(which) {
   const number = Number.isInteger(which) && which >= 1 && which <= today ? which : today;
   const id = newId();
   const duel = new Duel(id, await puzzle(number), Date.now());
-  rooms.set(id, { duel, listeners: new Set(), scores: new Map() });
+  rooms.set(id, { duel, listeners: new Set(), scores: new Map(), voice: new Map() });
   await save(duel);
   return id;
 }
@@ -147,17 +154,36 @@ async function handle(req, res) {
     const l = { player, res };
     room.listeners.add(l);
     if (duel.touch(player, Date.now())) { await save(duel); broadcast(room); }
-    send(res, duel.viewFor(player, Date.now()));
+    send(res, viewOf(room, player, Date.now()));
     // a named event (not a comment) so the page can tell a dead stream from a quiet one
     const ping = setInterval(() => res.write("event: ping\ndata: \n\n"), 15_000);
-    req.on("close", () => (clearInterval(ping), room.listeners.delete(l)));
+    req.on("close", () => {
+      clearInterval(ping);
+      room.listeners.delete(l);
+      // their last page gone: out of voice (a page that reconnects says it is in again)
+      if (room.voice.has(player) && ![...room.listeners].some((x) => x.player === player)) { room.voice.delete(player); broadcast(room); }
+    });
     return;
   }
 
   if (req.method !== "POST") return json(res, 405, { error: "method" });
-  const msg = await body(req);
+  const msg = await body(req, action === "signal" ? 32_768 : 4096);  // an SDP offer runs to a few KB
   const player = String(msg.player ?? "");
   const now = Date.now();
+
+  if (action === "voice") {
+    if (!duel.players.has(player)) throw new DuelError("not in this duel");
+    if (msg.on) room.voice.set(player, { muted: !!msg.muted }); else room.voice.delete(player);
+    broadcast(room);
+    return json(res, 200, { ok: true });
+  }
+  if (action === "signal") {
+    const to = String(msg.to ?? "");
+    if (!room.voice.has(player) || !room.voice.has(to) || to === player || typeof msg.data !== "string") return json(res, 409, { error: "not in voice" });
+    const out = `event: signal\ndata: ${JSON.stringify({ from: player, data: msg.data })}\n\n`;
+    for (const l of room.listeners) if (l.player === to) l.res.write(out);
+    return json(res, 200, { ok: true });
+  }
   const resumed = duel.touch(player, now);
 
   // heartbeat from an open page: only worth a broadcast if it ended an away-pause
@@ -174,10 +200,8 @@ async function handle(req, res) {
     duel.join(player, msg.name, now);
   } else if (action === "giveup") {
     duel.giveUp(player, now);
-  } else if (action === "start") {
-    if (!duel.players.has(player)) throw new DuelError("not in this duel");
-    duel.start(now);
-    setTimeout(() => broadcast(room), duel.startsAt - now + 10);
+  } else if (action === "ready") {
+    if (duel.setReady(player, !!msg.ready, now)) setTimeout(() => broadcast(room), duel.startsAt - now + 10);
   } else if (action === "rematch") {
     if (!duel.players.has(player)) throw new DuelError("not in this duel");
     // first one to ask picks the puzzle; everyone else is pointed at the same duel
@@ -199,7 +223,7 @@ async function handle(req, res) {
   await save(duel);
   broadcast(room);
   // the caller's own view comes back too, so a stalled event stream can't strand them
-  return json(res, 200, { ok: true, view: duel.viewFor(player, Date.now()) });
+  return json(res, 200, { ok: true, view: viewOf(room, player, Date.now()) });
 }
 
 // Stop the clock in duels where everyone still playing has gone quiet.

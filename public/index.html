@@ -81,6 +81,14 @@
   .side form .submit { font-size: 1.05rem; border-bottom: 2px solid var(--hot); padding-bottom: 1px; }
   .side form .submit:disabled { color: var(--faint); border-color: var(--rule); cursor: default; }
   #clock { font: 400 clamp(2.6rem, 10vw, 4rem)/1 var(--serif); letter-spacing: -.02em; }
+  #voice { margin-top: .5rem; color: var(--faint); font-size: 1rem; display: flex; flex-wrap: wrap; gap: .2rem .7rem; align-items: baseline; }
+  #voice button { color: var(--faint); border-bottom: 1px dotted var(--faint); }
+  #voice button:hover { color: var(--ink); }
+  #voice .who { color: var(--ink); }
+  #voice .who span { transition: color .15s; }
+  #voice .who .talking { color: var(--hot); }
+  #voice .who .muted, #voice .who .off { color: var(--faint); }
+  #voice .err { color: var(--hot); font-style: italic; }
   #share { color: var(--faint); font-size: 1rem; border-bottom: 1px dotted var(--faint); }
   #banner { font: 400 1.5rem/1.2 var(--serif); margin: 1.4rem 0 .4rem; }
   #banner b { color: var(--hot); font-weight: 400; }
@@ -89,8 +97,11 @@
   #lobby .who { display: flex; flex-wrap: wrap; gap: .4rem 1.4rem; font-size: 1.3rem; }
   #lobby .who span.me { text-decoration: underline; text-underline-offset: 4px; }
   #lobby .who span.empty { color: var(--faint); }
+  #lobby .who .ok { color: var(--hot); font-size: .8em; margin-left: .25em; }
+  #lobby .wait { color: var(--faint); font-style: italic; margin-left: 1rem; }
   #lobby form { display: flex; gap: 1rem; align-items: baseline; }
   #go { font: 400 1.6rem var(--serif); border-bottom: 2px solid var(--hot); justify-self: start; }
+  #go.on { color: var(--faint); border-color: var(--rule); }
   #go[disabled] { color: var(--faint); border-color: var(--rule); cursor: default; }
 
   input.line { -webkit-appearance: none; appearance: none; border-radius: 0; background: none; border: 0; border-bottom: 1.5px solid var(--ink); padding: 4px 0; outline: none; min-width: 0; }
@@ -151,6 +162,9 @@
   li.latest { border-bottom: 1.5px solid var(--ink); margin-bottom: .5em; }
   li .n { color: var(--faint); font-size: .8em; }
   li.pending { color: var(--faint); }
+  /* only shows if scoring is slow, so a quick guess doesn't flash a grey row first */
+  @media (prefers-reduced-motion: no-preference) { li.pending { animation: late .2s .35s both; } }
+  @keyframes late { from { opacity: 0; } }
   li .w { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   li .w.hidden { filter: blur(5px); user-select: none; color: var(--faint); }
   li .s { text-align: right; }
@@ -168,7 +182,8 @@
   #top #bug { margin-left: auto; }
   #top .logo { font: 400 1.6rem/1 Georgia, "Times New Roman", serif; letter-spacing: -.02em; color: inherit; text-decoration: none; }
   #top .logo i { color: var(--hot); }
-  #top button { color: var(--faint); font-size: 1rem; font-style: italic; border-bottom: 1px dotted var(--faint); }
+  @media (max-width: 380px) { #top .logo { font-size: 1.35rem; } }
+  #top button { color: var(--faint); font-size: 1.15rem; font-style: italic; border-bottom: 1px dotted var(--faint); }
   #report { border: 0; padding: 0; background: transparent; color: var(--ink); max-width: none; max-height: none; }
   #report::backdrop { background: color-mix(in srgb, var(--paper) 55%, transparent); backdrop-filter: blur(3px); }
   #report form { background: var(--paper); border: 1px solid var(--rule); box-shadow: 0 10px 40px rgb(0 0 0 / .18); width: min(30rem, calc(100vw - 32px)); padding: 1.3rem 1.3rem 1.1rem; display: grid; gap: .9rem; }
@@ -201,7 +216,7 @@
 </head>
 <body>
 
-<div id="top"><a href="/" class="logo" title="home" hidden>s<i>d</i></a><button type="button" id="bug">feedback</button></div>
+<div id="top"><a href="/" class="logo" title="home" hidden>semantle <i>duel</i></a><button type="button" id="bug">feedback</button></div>
 
 <main id="home" hidden>
   <h1><span class="lead">semantle</span> <span class="roll"><span><i>duel</i></span></span></h1>
@@ -226,12 +241,13 @@
     </div>
     <button id="share" title="copy link">copy link</button>
   </header>
+  <div id="voice" hidden></div>
   <div id="banner" hidden></div>
   <nav id="after" hidden></nav>
   <section id="lobby" hidden>
     <div class="who"></div>
     <form id="nameform"><input class="line" id="name" placeholder="your name" maxlength="24" autocomplete="off"></form>
-    <button id="go" disabled>start</button>
+    <div><button id="go" disabled>ready</button><span class="wait"></span></div>
   </section>
   <ol id="rivals" hidden></ol>
   <section id="board" hidden></section>
@@ -496,6 +512,178 @@ let currentView = null;  // the duel on screen, if any
   };
 }
 
+/* ---------- voice chat ---------- */
+// An audio-only WebRTC mesh between the duel's players who pressed "join voice", as in Nertz: every
+// pair has one RTCPeerConnection. Who is in voice comes with each view (`voice`); offers, answers and
+// ICE candidates go up as POST /signal and come down the event stream (`event: signal`), the sender
+// stamped by the server. Of two players the one with the smaller id makes the offer, so offers never cross.
+// STUN only: two players both behind strict NATs won't hear each other (that would need a TURN relay).
+const ICE_SERVERS = [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302", "stun:stun.cloudflare.com:3478"] }];
+
+function voiceChat(base, changed) {
+  const st = { status: "off", muted: false, error: null, speaking: new Set(), links: new Map() };
+  const peers = new Map();  // id -> { pc, audio, queued }
+  const meters = new Map(); // id -> { node, source }
+  let mic = null, ctx = null, timer = null, asks = 0;
+  const signal = (to, data) => post(`${base}/signal`, { player: me, to, data: JSON.stringify(data) });
+  const tell = () => post(`${base}/voice`, { player: me, on: st.status === "on", muted: st.muted });
+
+  async function join() {
+    if (st.status !== "off") return;
+    st.status = "asking"; st.error = null; changed();
+    const ask = ++asks;
+    let made = null;
+    try { made = new AudioContext(); } catch {}  // made inside the click, so audio may play; only for who's speaking
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    } catch {
+      made?.close();
+      if (ask === asks && st.status === "asking") { st.status = "off"; st.error = "no microphone: check the browser’s permission"; changed(); }
+      return;
+    }
+    if (ask !== asks || st.status !== "asking") { for (const t of stream.getTracks()) t.stop(); made?.close(); return; }
+    mic = stream; ctx = made; ctx?.resume();
+    for (const t of mic.getAudioTracks()) t.enabled = !st.muted;
+    meter(me, mic);
+    timer = setInterval(measure, 120);
+    st.status = "on"; changed();
+    const r = await tell();
+    if (!r.ok) { leave(false); st.error = r.error ?? "couldn’t join voice"; changed(); }
+  }
+
+  function leave(say = true) {
+    if (st.status === "off") return;
+    asks++;
+    for (const id of [...peers.keys()]) close(id);
+    for (const t of mic?.getTracks() ?? []) t.stop();
+    mic = null;
+    clearInterval(timer);
+    for (const m of meters.values()) m.source.disconnect();
+    meters.clear();
+    ctx?.close(); ctx = null;
+    const was = st.status;
+    st.status = "off"; st.speaking = new Set(); changed();
+    if (say && was === "on") tell();
+  }
+
+  function setMuted(muted) {
+    st.muted = muted;
+    for (const t of mic?.getAudioTracks() ?? []) t.enabled = !muted;
+    changed();
+    if (st.status === "on") tell();
+  }
+
+  // The server said who's in voice: connect to whoever is new, drop whoever has gone.
+  function sync(members = []) {
+    if (st.status !== "on") return;
+    if (!members.some((m) => m.id === me)) {
+      // the server lost us (the event stream dropped and came back): say so again
+      for (const id of [...peers.keys()]) close(id);
+      tell();
+      return;
+    }
+    for (const id of [...peers.keys()]) if (!members.some((m) => m.id === id)) close(id);
+    for (const { id } of members) {
+      if (id === me || peers.has(id)) continue;
+      const peer = open(id);
+      if (me < id) offer(id, peer);
+    }
+  }
+
+  function link(id, to) {
+    if (st.links.get(id) === to) return;
+    to ? st.links.set(id, to) : st.links.delete(id);
+    changed();
+  }
+
+  function open(id) {
+    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    const audio = new Audio();
+    audio.autoplay = true;
+    const peer = { pc, audio, queued: [] };
+    peers.set(id, peer);
+    for (const t of mic?.getAudioTracks() ?? []) pc.addTrack(t, mic);
+    pc.onicecandidate = (e) => e.candidate && signal(id, { ice: e.candidate.toJSON() });
+    pc.ontrack = (e) => {
+      const stream = e.streams[0] ?? new MediaStream([e.track]);
+      audio.srcObject = stream;
+      // normally allowed (we joined with a click); if not, the next tap anywhere starts it
+      audio.play().catch(() => document.addEventListener("pointerdown", () => audio.play().catch(() => {}), { once: true }));
+      meter(id, stream);
+    };
+    pc.onconnectionstatechange = () => {
+      if (peers.get(id) !== peer) return;
+      const s = pc.connectionState;
+      link(id, s === "connected" ? "on" : s === "failed" ? "failed" : "connecting");
+      if (s === "failed" && me < id) offer(id, peer, true);  // a path that died (network change): try again
+    };
+    link(id, "connecting");
+    return peer;
+  }
+
+  function close(id) {
+    const peer = peers.get(id);
+    if (!peer) return;
+    peers.delete(id);
+    peer.pc.onicecandidate = peer.pc.ontrack = peer.pc.onconnectionstatechange = null;
+    peer.pc.close();
+    peer.audio.pause(); peer.audio.srcObject = null;
+    meters.get(id)?.source.disconnect(); meters.delete(id);
+    link(id, null);
+  }
+
+  async function offer(id, peer, iceRestart = false) {
+    try {
+      await peer.pc.setLocalDescription(await peer.pc.createOffer({ iceRestart }));
+      if (peers.get(id) === peer) signal(id, { sdp: peer.pc.localDescription.toJSON() });
+    } catch {}  // closed meanwhile
+  }
+
+  async function onSignal(from, data) {
+    if (st.status !== "on") return;
+    try {
+      const what = JSON.parse(data);
+      const peer = peers.get(from) ?? open(from);
+      const { pc } = peer;
+      if (what.sdp) {
+        await pc.setRemoteDescription(what.sdp);
+        for (const c of peer.queued.splice(0)) await pc.addIceCandidate(c);
+        if (what.sdp.type === "offer") {
+          await pc.setLocalDescription(await pc.createAnswer());
+          if (peers.get(from) === peer) signal(from, { sdp: pc.localDescription.toJSON() });
+        }
+      } else if (what.ice) {
+        if (pc.remoteDescription) await pc.addIceCandidate(what.ice); else peer.queued.push(what.ice);
+      }
+    } catch {}  // malformed, or for a connection closed since
+  }
+
+  function meter(id, stream) {
+    if (!ctx) return;
+    meters.get(id)?.source.disconnect();
+    const node = ctx.createAnalyser();
+    node.fftSize = 512;
+    const source = ctx.createMediaStreamSource(stream);
+    source.connect(node);  // not to the speakers: the audio elements play it
+    meters.set(id, { node, source });
+  }
+
+  function measure() {
+    const now = new Set(), samples = new Float32Array(512);
+    for (const [id, { node }] of meters) {
+      node.getFloatTimeDomainData(samples);
+      let sum = 0;
+      for (const x of samples) sum += x * x;
+      if (Math.sqrt(sum / samples.length) > 0.02 && !(id === me && st.muted)) now.add(id);
+    }
+    if ([...now].sort().join() !== [...st.speaking].sort().join()) { st.speaking = now; changed(); }
+  }
+
+  addEventListener("pagehide", () => leave());
+  return { state: st, join, leave, setMuted, sync, onSignal };
+}
+
 /* ---------- pages ---------- */
 if (path[0] === "d") { $("#top .logo").hidden = false; duelPage(path[1]); }  // home and archive have their own way home
 else if (path[0] === "archive") archivePage();
@@ -574,7 +762,10 @@ function duelPage(id) {
     clearTimeout(naming);
     if (name) naming = setTimeout(() => (store.set("sd-name", name), join(name)), 300);
   };
-  $("#go").onclick = () => post(`${base}/start`, { player: me });
+  $("#go").onclick = () => {
+    const mine = view?.players.find((p) => p.id === me);
+    if (mine) post(`${base}/ready`, { player: me, ready: !mine.ready }).then((r) => r.view && apply(r.view));
+  };
   $("#share").onclick = async () => {
     try { await navigator.clipboard.writeText(location.href); $("#share").textContent = "copied"; }
     catch { $("#share").textContent = location.href; }
@@ -590,7 +781,9 @@ function duelPage(id) {
     es = new EventSource(`${base}/events?player=${encodeURIComponent(me)}`);
     es.onmessage = (e) => { heard = Date.now(); apply(JSON.parse(e.data)); };
     es.addEventListener("ping", () => (heard = Date.now()));
+    es.addEventListener("signal", (e) => { heard = Date.now(); const m = JSON.parse(e.data); voice.onSignal(m.from, m.data); });
   };
+  const voice = voiceChat(base, () => view && voiceBar(view));
   connect();
   setInterval(() => Date.now() - heard > 40_000 && connect(), 5_000);
   document.addEventListener("visibilitychange", () => !document.hidden && Date.now() - heard > 20_000 && connect());
@@ -606,6 +799,7 @@ function duelPage(id) {
     if (view && v.now < view.now) return;  // an older snapshot arriving late
     view = currentView = v;
     skew = view.now - Date.now();
+    voice.sync(v.voice);
     render();
   }
 
@@ -634,12 +828,21 @@ function duelPage(id) {
     $("#share").hidden = !lobby;
     if (lobby) {
       const who = $("#lobby .who");
-      who.replaceChildren(...v.players.map((p) => p.id === me
-        ? el("span", { class: "me" }, $("#name").value.trim() || p.name)
-        : el("span", {}, p.name)));
+      const tick = (p) => (p.ready ? el("span", { class: "ok", title: "ready" }, "✓") : "");
+      who.replaceChildren(...v.players.map((p) => el("span", {},
+        el("span", { class: p.id === me ? "me" : "" }, p.id === me ? $("#name").value.trim() || p.name : p.name), tick(p))));
       if (v.players.length < v.max) who.append(el("span", { class: "empty" }, "…"));
       $("#nameform").hidden = !inIt && v.players.length >= v.max;
-      $("#go").disabled = !(inIt && v.players.length >= 2);
+      // everyone says ready, then the countdown starts by itself
+      const mine = v.players.find((p) => p.id === me);
+      const go = $("#go");
+      go.disabled = !mine;
+      go.classList.toggle("on", !!mine?.ready);
+      go.textContent = mine?.ready ? "not ready" : "ready";
+      const unready = v.players.filter((p) => !p.ready && p.id !== me).map((p) => p.name);
+      $("#lobby .wait").textContent = !mine?.ready ? ""
+        : v.players.length < 2 ? "waiting for an opponent…"
+        : unready.length ? `waiting for ${unready.join(", ")}…` : "";
     }
 
     // your own result, once you have one
@@ -654,6 +857,7 @@ function duelPage(id) {
     }
     after(v, mine);
     pausebar(v, mine);
+    voiceBar(v);
 
     const board = $("#board");
     board.hidden = lobby;
@@ -687,6 +891,36 @@ function duelPage(id) {
     const by = v.paused?.by && v.players.find((p) => p.id === v.paused.by);
     const kids = !v.paused ? (racer ? ["·", toggle("pause", true)] : [])
       : [`· ${!by ? "paused while away" : by.id === me ? "paused" : `${by.name} paused`}`, racer ? toggle("resume", false) : ""];
+    bar.replaceChildren(...kids);
+  }
+
+  // voice chat, for the duel's players: join, then who's in (lit while talking), mute and leave
+  function voiceBar(v) {
+    const bar = $("#voice"), st = voice.state;
+    const inIt = v.players.some((p) => p.id === me);
+    bar.hidden = !inIt || !window.RTCPeerConnection || !navigator.mediaDevices;
+    if (bar.hidden) return;
+    const members = v.voice ?? [];
+    const nameOf = (id) => (id === me ? "you" : v.players.find((p) => p.id === id)?.name ?? "?");
+    const btn = (label, fn) => { const b = el("button", { type: "button" }, label); b.onclick = fn; return b; };
+    const kids = [];
+    if (st.status === "off") {
+      kids.push(btn("join voice", () => voice.join()));
+      const others = members.filter((m) => m.id !== me).map((m) => nameOf(m.id));
+      if (others.length) kids.push(el("span", {}, `${others.join(", ")} ${others.length > 1 ? "are" : "is"} in`));
+      if (st.error) kids.push(el("span", { class: "err" }, st.error));
+    } else if (st.status === "asking") {
+      kids.push(el("span", {}, "asking for the microphone…"));
+    } else {
+      const list = [{ id: me, muted: st.muted }, ...members.filter((m) => m.id !== me)];
+      kids.push(el("span", { class: "who" }, "voice: ", ...list.flatMap((m, i) => {
+        const failed = m.id !== me && st.links.get(m.id) === "failed";
+        const cls = st.speaking.has(m.id) ? "talking" : m.muted ? "muted" : failed || (m.id !== me && st.links.get(m.id) !== "on") ? "off" : "";
+        const label = nameOf(m.id) + (m.muted ? " (muted)" : failed ? " (can’t connect)" : "");
+        return [i ? ", " : "", el("span", { class: cls }, label)];
+      })));
+      kids.push(btn(st.muted ? "unmute" : "mute", () => voice.setMuted(!st.muted)), btn("leave", () => voice.leave()));
+    }
     bar.replaceChildren(...kids);
   }
 
@@ -777,15 +1011,17 @@ function duelPage(id) {
     const again = mine && recall ? p.guesses.find((g) => g.word === recall) : null;
     const told = mine && note && !f;
     if (p.guesses.length || waiting.length || told) ol.append(heads());
-    if (told) ol.append(el("li", { class: "note" }, el("span", { class: "n" }, ""), el("span", { class: "w" }, note.word), el("span", { class: "msg" }, note.msg)));
-    for (const w of waiting) ol.append(el("li", { class: "pending" }, el("span", { class: "n num" }, ""), el("span", { class: "w" }, w), el("span", { class: "s num" }, "…"), el("span", {})));
     const last = p.guesses.at(-1);
     let sorted = [...p.guesses].sort((a, b) => b.score - a.score);
     // a crowded table keeps opponents short until the end
     const cap = !mine && v.players.length > 2 && v.status !== "over" ? 8 : Infinity;
     const more = sorted.length - cap;
     sorted = sorted.slice(0, cap);
-    if (again && !f) ol.append(row(again, p, v, true, flashRecall));
+    // One row up top, for whatever happened last: a word that didn't count, one being scored, one already
+    // guessed, or the latest guess. (A note is newer than anything pending: sending a word clears it.)
+    if (told) ol.append(el("li", { class: "note latest" }, el("span", { class: "n" }, ""), el("span", { class: "w" }, note.word), el("span", { class: "msg" }, note.msg)));
+    else if (waiting.length) ol.append(el("li", { class: "pending latest" }, el("span", { class: "n num" }, ""), el("span", { class: "w" }, waiting.at(-1)), el("span", { class: "s num" }, "…"), el("span", {})));
+    else if (again && !f) ol.append(row(again, p, v, true, flashRecall));
     else if (last && p.guesses.length > 1) ol.append(row(last, p, v, true));
     for (const g of sorted) ol.append(row(g, p, v, false));
     if (more > 0) ol.append(el("li", { class: "more" }, `+${more}`));
