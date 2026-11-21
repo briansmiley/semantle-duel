@@ -9,10 +9,11 @@ const ABANDON_MS = 24 * 3600_000; // a started duel with no moves this long ends
 // Long enough to ride out a background tab's throttled timers (Chrome: once a minute).
 export const AWAY_MS = Number(process.env.AWAY_MS ?? 90_000);
 
-/** @typedef {{n:number, word:string, score:number, rank:number|null, at:number}} Guess */
+/** @typedef {{n:number, word:string, score:number, rank:number|null, at:number, hint?:boolean}} Guess  hint: given to everyone, agreed on */
+/** @typedef {{word:string, score:number, rank:number|null, at:number}} Check  a word scored after you finished, for your eyes only */
 /** @typedef {{at:number, found:boolean}} Finish */
 /** @typedef {{from:number, to:number|null, by:string|null}} Pause  by: who pressed pause, or null when everyone left */
-/** @typedef {{id:string, name:string, guesses:Guess[], finish:Finish|null, ready?:boolean}} Player  ready: in the lobby, said they are set to go */
+/** @typedef {{id:string, name:string, guesses:Guess[], finish:Finish|null, ready?:boolean, checks?:Check[]}} Player  ready: in the lobby, said they are set to go */
 
 export class Duel {
   /** @param {string} id @param {{number:number, secret:string, closest:number, tenth:number, thousandth:number}} puzzle */
@@ -26,6 +27,7 @@ export class Duel {
     /** @type {string|null} the rematch duel, once someone asks for one */ this.next = null;
     /** @type {Pause[]} */ this.pauses = [];
     /** @type {Record<string, number>} when each player was last heard from */ this.seen = {};
+    /** @type {string[]} players asking for a hint; given once everyone still racing has asked */ this.hintAsks = [];
   }
 
   /** The open pause, if the clock is stopped. */
@@ -138,6 +140,52 @@ export class Duel {
     return null;
   }
 
+  /** Why a finished player can't check this word, or null if they can. */
+  checkRefusal(playerId, word) {
+    const p = this.players.get(playerId);
+    if (!p?.finish) return "not finished";
+    if (!/^[a-z][a-z'-]*$/.test(word)) return "not a word";
+    if (p.guesses.some((g) => g.word === word) || p.checks?.some((c) => c.word === word)) return "already guessed";
+    return null;
+  }
+
+  /** After finishing: score a word just to see, outside the race. */
+  check(playerId, word, { score, rank }, now) {
+    const why = this.checkRefusal(playerId, word);
+    if (why) throw new DuelError(why);
+    const p = this.players.get(playerId);
+    (p.checks ??= []).push({ word, score, rank, at: now });
+  }
+
+  /** Still racing, in the order they joined. */
+  racers(now) {
+    return this.status(now) === "playing" ? [...this.players.values()].filter((p) => !p.finish) : [];
+  }
+
+  /** Ask for a hint (or stop asking). Returns true once everyone still racing has asked. */
+  askHint(playerId, want, now) {
+    if (!this.racing(playerId, now)) throw new DuelError("not playing");
+    if (this.pause()) throw new DuelError("paused");
+    const racing = new Set(this.racers(now).map((p) => p.id));
+    this.hintAsks = this.hintAsks.filter((id) => id !== playerId && racing.has(id));
+    if (want) this.hintAsks.push(playerId);
+    return racing.size > 0 && [...racing].every((id) => this.hintAsks.includes(id));
+  }
+
+  /** The best rank anyone has reached (0 if nobody is in the top 1000). */
+  bestRank() {
+    return Math.max(0, ...[...this.players.values()].flatMap((p) => p.guesses.map((g) => (g.word === this.puzzle.secret ? 0 : g.rank ?? 0))));
+  }
+
+  /** Everyone still racing gets this word as a guess. */
+  giveHint(word, { score, rank }, now) {
+    for (const p of this.racers(now)) {
+      if (p.guesses.some((g) => g.word === word)) continue;
+      p.guesses.push({ n: p.guesses.length + 1, word, score, rank, at: now, hint: true });
+    }
+    this.hintAsks = [];
+  }
+
   /** Record a scored guess. Re-checks, since scoring is async. */
   guess(playerId, word, { score, rank }, now) {
     const why = this.refusal(playerId, word, now);
@@ -170,6 +218,7 @@ export class Duel {
       endedAt: status === "over" ? this.endedAt() : null,
       elapsed: this.elapsed(ended),  // the clock as of `now`; it runs on from here unless paused or over
       paused: open ? { by: open.by, from: open.from } : null,
+      hintAsks: status === "playing" ? this.hintAsks.filter((id) => !this.players.get(id)?.finish) : [],
       secret: reveal ? this.puzzle.secret : null,
       max: MAX_PLAYERS,
       next: this.next,
@@ -181,17 +230,21 @@ export class Duel {
         finish: p.finish && { ...p.finish, time: this.elapsed(p.finish.at) },
         guesses: p.guesses.map((g) => ({
           n: g.n,
-          word: reveal || p.id === viewerId ? g.word : null,
+          word: reveal || p.id === viewerId || g.hint ? g.word : null,
           score: g.score,
           rank: g.rank,
           at: g.at,
+          hint: !!g.hint,
+          // someone else found their own way to this word too (scores give that away anyway)
+          shared: !g.hint && [...this.players.values()].some((q) => q !== p && q.guesses.some((h) => h.word === g.word && !h.hint)),
         })),
+        checks: p.id === viewerId ? p.checks ?? [] : [],
       })),
     };
   }
 
   toJSON() {
-    return { id: this.id, puzzle: this.puzzle, players: [...this.players.values()], startsAt: this.startsAt, createdAt: this.createdAt, next: this.next, pauses: this.pauses, seen: this.seen };
+    return { id: this.id, puzzle: this.puzzle, players: [...this.players.values()], startsAt: this.startsAt, createdAt: this.createdAt, next: this.next, pauses: this.pauses, seen: this.seen, hintAsks: this.hintAsks };
   }
 
   static fromJSON(o) {
@@ -201,6 +254,7 @@ export class Duel {
     d.next = o.next ?? null;
     d.pauses = o.pauses ?? [];
     d.seen = o.seen ?? {};
+    d.hintAsks = o.hintAsks ?? [];
     // duels saved before players finished separately: the winner had found it
     if (o.won) {
       const w = d.players.get(o.won.player);

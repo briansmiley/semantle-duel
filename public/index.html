@@ -77,6 +77,7 @@
   #clock.stopped { color: var(--faint); }
   #pausebar { color: var(--faint); font-size: .95rem; margin-left: .5em; }
   #pausebar button { color: var(--ink); border-bottom: 1px solid currentColor; margin-left: .3em; }
+  #pausebar .ask { color: var(--hot); }
   #board.paused .side.me ol, #board.paused #guess { filter: blur(6px); pointer-events: none; }
   .side form .submit { font-size: 1.05rem; border-bottom: 2px solid var(--hot); padding-bottom: 1px; }
   .side form .submit:disabled { color: var(--faint); border-color: var(--rule); cursor: default; }
@@ -84,6 +85,7 @@
   #voice { margin-top: .5rem; color: var(--faint); font-size: 1rem; display: flex; flex-wrap: wrap; gap: .2rem .7rem; align-items: baseline; }
   #voice button { color: var(--faint); border-bottom: 1px dotted var(--faint); }
   #voice button:hover { color: var(--ink); }
+  #voice button.call { color: var(--hot); border-bottom: 1.5px solid var(--hot); }
   #voice .who { color: var(--ink); }
   #voice .who span { transition: color .15s; }
   #voice .who .talking { color: var(--hot); }
@@ -96,8 +98,15 @@
   #lobby { margin-top: 2.2rem; display: grid; gap: 1.6rem; }
   #lobby .who { display: flex; flex-wrap: wrap; gap: .4rem 1.4rem; font-size: 1.3rem; }
   #lobby .who span.me { text-decoration: underline; text-underline-offset: 4px; }
+  #lobby .who .others { display: contents; }
+  #mine { display: inline-flex; align-items: baseline; gap: .3em; }
+  #mine input { font-size: inherit; width: 8em; }
+  #mine .pencil { color: var(--faint); align-self: center; display: grid; }
+  #mine .pencil:hover { color: var(--ink); }
+  #mine .pencil svg { width: .8em; height: .8em; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
   #lobby .who span.empty { color: var(--faint); }
   #lobby .who .ok { color: var(--hot); font-size: .8em; margin-left: .25em; }
+  #lobby .who .me .ok { display: inline-block; }  /* out of the name's underline */
   #lobby .wait { color: var(--faint); font-style: italic; margin-left: 1rem; }
   #lobby form { display: flex; gap: 1rem; align-items: baseline; }
   #go { font: 400 1.6rem var(--serif); border-bottom: 2px solid var(--hot); justify-self: start; }
@@ -161,6 +170,9 @@
   li.heads span { font-size: .75em; }
   li.latest { border-bottom: 1.5px solid var(--ink); margin-bottom: .5em; }
   li .n { color: var(--faint); font-size: .8em; }
+  li.shared .n { color: var(--ink); font-weight: 600; }  /* someone else guessed it too */
+  li .w small { color: var(--hot); font-size: .72em; font-style: italic; margin-left: .35em; }
+  li.check .w { font-style: italic; }
   li.pending { color: var(--faint); }
   /* only shows if scoring is slow, so a quick guess doesn't flash a grey row first */
   @media (prefers-reduced-motion: no-preference) { li.pending { animation: late .2s .35s both; } }
@@ -174,6 +186,7 @@
   li .p .bar i { display: block; height: 100%; background: var(--hot); }
   li .p.temp { color: var(--faint); }
   li.secret .w { color: var(--hot); }
+  li.missed .w, li.missed .s { color: var(--faint); }
   li.fresh { animation: fresh 1.2s ease-out; }
   @keyframes fresh { from { background: color-mix(in srgb, var(--hot) 14%, transparent); } }
 
@@ -245,8 +258,7 @@
   <div id="banner" hidden></div>
   <nav id="after" hidden></nav>
   <section id="lobby" hidden>
-    <div class="who"></div>
-    <form id="nameform"><input class="line" id="name" placeholder="your name" maxlength="24" autocomplete="off"></form>
+    <div class="who"><span id="mine"><form id="nameform"><input class="line" id="name" placeholder="your name" maxlength="24" autocomplete="off"></form><span class="me"></span><button type="button" class="pencil" title="change your name" aria-label="change your name"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4"/></svg></button></span><span class="others"></span></div>
     <div><button id="go" disabled>ready</button><span class="wait"></span></div>
   </section>
   <ol id="rivals" hidden></ol>
@@ -744,14 +756,22 @@ function duelPage(id) {
   const join = (name) => post(`${base}/join`, { player: me, name });
   const savedName = store.get("sd-name");
   if (savedName) { $("#name").value = savedName; join(savedName); }
+  // your name in the lobby list is its own input: shown, with a pencil, or being edited
+  let editing = !savedName;
+  const showMine = () => {
+    $("#nameform").hidden = !editing;
+    $("#mine .me").hidden = $("#mine .pencil").hidden = editing;
+  };
+  showMine();
+  $("#mine .pencil").onclick = () => { editing = true; showMine(); $("#name").focus(); $("#name").select(); };
 
   $("#nameform").onsubmit = (e) => {
     e.preventDefault();
     const name = $("#name").value.trim();
-    if (!name) return;
-    store.set("sd-name", name);
-    join(name);
-    $("#name").blur();
+    if (!name) { const was = store.get("sd-name"); if (!was) return; $("#name").value = was; }
+    else { store.set("sd-name", name); join(name); }
+    editing = false; showMine();
+    if (view) render();
   };
   $("#name").onblur = () => $("#nameform").requestSubmit();
   // Your name in the list follows the box as you type; everyone else sees it once you pause.
@@ -827,14 +847,15 @@ function duelPage(id) {
     $("#lobby").hidden = !lobby;
     $("#share").hidden = !lobby;
     if (lobby) {
-      const who = $("#lobby .who");
+      // you first (your entry is kept, not redrawn, so typing in it isn't interrupted), then everyone else
       const tick = (p) => (p.ready ? el("span", { class: "ok", title: "ready" }, "✓") : "");
-      who.replaceChildren(...v.players.map((p) => el("span", {},
-        el("span", { class: p.id === me ? "me" : "" }, p.id === me ? $("#name").value.trim() || p.name : p.name), tick(p))));
-      if (v.players.length < v.max) who.append(el("span", { class: "empty" }, "…"));
-      $("#nameform").hidden = !inIt && v.players.length >= v.max;
-      // everyone says ready, then the countdown starts by itself
       const mine = v.players.find((p) => p.id === me);
+      $("#mine").hidden = !mine && v.players.length >= v.max;
+      $("#mine .me").replaceChildren($("#name").value.trim() || mine?.name || "", ...(mine ? [tick(mine)] : []));
+      const others = v.players.filter((p) => p.id !== me).map((p) => el("span", {}, el("span", {}, p.name), tick(p)));
+      if (v.players.length + (mine ? 0 : 1) < v.max) others.push(el("span", { class: "empty" }, "…"));
+      $("#lobby .who .others").replaceChildren(...others);
+      // everyone says ready, then the countdown starts by itself
       const go = $("#go");
       go.disabled = !mine;
       go.classList.toggle("on", !!mine?.ready);
@@ -873,7 +894,7 @@ function duelPage(id) {
     const rivals = $("#rivals");
     rivals.hidden = !inIt;
     rivals.replaceChildren(...sides.filter((p) => p.id !== me).map((p) => rival(p, v)));
-    seen = new Set(v.players.flatMap((p) => p.guesses.map((g) => `${p.id}:${g.n}`)));
+    seen = new Set(v.players.flatMap((p) => [...p.guesses.map((g) => `${p.id}:${g.n}`), ...(p.checks ?? []).map((c, k) => `${p.id}:c${k}`)]));
     flashRecall = false;
     if (focused || (v.status === "playing" && inIt && !matchMedia("(hover: none)").matches)) $("#guess")?.focus();
   }
@@ -889,9 +910,25 @@ function duelPage(id) {
       return b;
     };
     const by = v.paused?.by && v.players.find((p) => p.id === v.paused.by);
-    const kids = !v.paused ? (racer ? ["·", toggle("pause", true)] : [])
+    const kids = !v.paused ? (racer ? ["·", toggle("pause", true), " · ", ...hint(v)] : [])
       : [`· ${!by ? "paused while away" : by.id === me ? "paused" : `${by.name} paused`}`, racer ? toggle("resume", false) : ""];
     bar.replaceChildren(...kids);
+  }
+
+  // A hint is given to everyone still racing, once all of them have asked for it.
+  function hint(v) {
+    const asks = v.hintAsks ?? [];
+    const ask = (want, label) => {
+      const b = el("button", { type: "button" }, label);
+      b.onclick = () => post(`${base}/hint`, { player: me, want }).then((r) => { if (r.view) apply(r.view); if (!r.ok && r.error) { note = { word: "hint", msg: r.error }; render(); } });
+      return b;
+    };
+    const others = v.players.filter((p) => p.id !== me && !p.finish);
+    const asked = others.filter((p) => asks.includes(p.id)).map((p) => p.name);
+    const notYet = others.filter((p) => !asks.includes(p.id)).map((p) => p.name);
+    if (asks.includes(me)) return [el("span", {}, `hint asked, waiting for ${notYet.join(", ")}`), ask(false, "cancel")];
+    if (asked.length) return [el("span", { class: "ask" }, `${asked.join(", ")} ${asked.length > 1 ? "want" : "wants"} a hint`), ask(true, "agree")];
+    return [ask(true, "hint")];
   }
 
   // voice chat, for the duel's players: join, then who's in (lit while talking), mute and leave
@@ -905,8 +942,10 @@ function duelPage(id) {
     const btn = (label, fn) => { const b = el("button", { type: "button" }, label); b.onclick = fn; return b; };
     const kids = [];
     if (st.status === "off") {
-      kids.push(btn("join voice", () => voice.join()));
       const others = members.filter((m) => m.id !== me).map((m) => nameOf(m.id));
+      const b = btn("join voice", () => voice.join());
+      if (others.length) b.classList.add("call");
+      kids.push(b);
       if (others.length) kids.push(el("span", {}, `${others.join(", ")} ${others.length > 1 ? "are" : "is"} in`));
       if (st.error) kids.push(el("span", { class: "err" }, st.error));
     } else if (st.status === "asking") {
@@ -967,9 +1006,10 @@ function duelPage(id) {
         : n ? `${n} · ${best.toFixed(2)}` : ""),
     ));
 
-    if (mine && v.status === "playing" && !f) {
+    // racing: guess; finished: keep checking words, just for their scores
+    if (mine && (v.status === "playing" || v.status === "over")) {
       const form = el("form", {});
-      const input = el("input", { class: "line", id: "guess", placeholder: "type a guess", autocomplete: "off", autocapitalize: "off", spellcheck: "false", enterkeyhint: "go" });
+      const input = el("input", { class: "line", id: "guess", placeholder: f ? "check a word" : "type a guess", autocomplete: "off", autocapitalize: "off", spellcheck: "false", enterkeyhint: "go" });
       input.value = draft;
       input.oninput = () => (draft = input.value);
       const quit = el("button", { class: "giveup", type: "button" }, "give up");
@@ -980,15 +1020,17 @@ function duelPage(id) {
       };
       const submit = el("button", { class: "submit", type: "submit" }, "guess");
       submit.onpointerdown = (e) => e.preventDefault();  // keep the keyboard up on phones
-      if (v.paused) { input.disabled = true; submit.disabled = true; }
-      form.append(input, submit, quit);
+      if (v.paused && !f) { input.disabled = true; submit.disabled = true; }
+      if (f) submit.textContent = "check";
+      form.append(input, submit, f ? "" : quit);
       form.onsubmit = async (e) => {
         e.preventDefault();
         const word = input.value.trim().toLowerCase();
         if (!word) return;
         draft = ""; input.value = "";
         note = null; recall = null;
-        const known = view.players.find((q) => q.id === me)?.guesses ?? [];
+        const mineNow = view.players.find((q) => q.id === me);
+        const known = [...(mineNow?.guesses ?? []), ...(mineNow?.checks ?? [])];
         if (known.some((g) => g.word === word)) { recall = word; flashRecall = true; return render(); }
         if (pending.includes(word)) return render();
         pending.push(word); render();
@@ -1005,14 +1047,16 @@ function duelPage(id) {
     }
 
     const ol = el("ol", {});
-    if (mine) pending = pending.filter((w) => !p.guesses.some((g) => g.word === w));
-    if (mine && note && p.guesses.some((g) => g.word === note.word)) note = null;  // it got through after all
+    // words checked after finishing sit among the guesses, unnumbered
+    const all = [...p.guesses, ...(p.checks ?? []).map((c, k) => ({ ...c, n: null, k, check: true }))];
+    if (mine) pending = pending.filter((w) => !all.some((g) => g.word === w));
+    if (mine && note && all.some((g) => g.word === note.word)) note = null;  // it got through after all
     const waiting = mine ? pending : [];
-    const again = mine && recall ? p.guesses.find((g) => g.word === recall) : null;
-    const told = mine && note && !f;
-    if (p.guesses.length || waiting.length || told) ol.append(heads());
-    const last = p.guesses.at(-1);
-    let sorted = [...p.guesses].sort((a, b) => b.score - a.score);
+    const again = mine && recall ? all.find((g) => g.word === recall) : null;
+    const told = mine && note;
+    if (all.length || waiting.length || told) ol.append(heads());
+    const last = all.reduce((a, g) => (!a || g.at >= a.at ? g : a), null);
+    let sorted = [...all].sort((a, b) => b.score - a.score);
     // a crowded table keeps opponents short until the end
     const cap = !mine && v.players.length > 2 && v.status !== "over" ? 8 : Infinity;
     const more = sorted.length - cap;
@@ -1021,8 +1065,10 @@ function duelPage(id) {
     // guessed, or the latest guess. (A note is newer than anything pending: sending a word clears it.)
     if (told) ol.append(el("li", { class: "note latest" }, el("span", { class: "n" }, ""), el("span", { class: "w" }, note.word), el("span", { class: "msg" }, note.msg)));
     else if (waiting.length) ol.append(el("li", { class: "pending latest" }, el("span", { class: "n num" }, ""), el("span", { class: "w" }, waiting.at(-1)), el("span", { class: "s num" }, "…"), el("span", {})));
-    else if (again && !f) ol.append(row(again, p, v, true, flashRecall));
-    else if (last && p.guesses.length > 1) ol.append(row(last, p, v, true));
+    else if (again) ol.append(row(again, p, v, true, flashRecall));
+    else if (last && all.length > 1) ol.append(row(last, p, v, true));
+    // gave up: the word they didn't get, where it would have sat
+    if (f && !f.found && v.secret) ol.append(el("li", { class: "missed" }, el("span", { class: "n" }, ""), el("span", { class: "w" }, v.secret), el("span", { class: "s num" }, "100.00"), el("span", { class: "p" }, "😞")));
     for (const g of sorted) ol.append(row(g, p, v, false));
     if (more > 0) ol.append(el("li", { class: "more" }, `+${more}`));
     div.append(ol);
@@ -1048,6 +1094,7 @@ function duelPage(id) {
     if (open.has(p.id)) {
       const ol = el("ol", {});
       if (last && n > 1) ol.append(row(last, p, v, true));
+      if (f && !f.found && v.secret) ol.append(el("li", { class: "missed" }, el("span", { class: "n" }, ""), el("span", { class: "w" }, v.secret), el("span", { class: "s num" }, "100.00"), el("span", { class: "p" }, "😞")));
       for (const g of [...p.guesses].sort((a, b) => b.score - a.score)) ol.append(row(g, p, v, false));
       li.append(ol);
     }
@@ -1055,12 +1102,13 @@ function duelPage(id) {
   }
 
   function row(g, p, v, isLatest, isAgain = false) {
-    const fresh = (isLatest || p.guesses.length === 1) && seen !== null && !seen.has(`${p.id}:${g.n}`);
-    const li = el("li", { class: [isLatest && "latest", fresh && "fresh", isAgain && "again", v.secret && g.word === v.secret && "secret"].filter(Boolean).join(" ") });
+    const key = g.check ? `c${g.k}` : g.n;
+    const fresh = (isLatest || p.guesses.length === 1) && seen !== null && !seen.has(`${p.id}:${key}`);
+    const li = el("li", { class: [isLatest && "latest", fresh && "fresh", isAgain && "again", g.shared && "shared", g.check && "check", v.secret && g.word === v.secret && "secret"].filter(Boolean).join(" ") });
     const word = g.word ?? "x".repeat(4 + ((g.n * 7 + p.id.charCodeAt(0)) % 6));
     li.append(
-      el("span", { class: "n num" }, g.n),
-      el("span", { class: "w" + (g.word ? "" : " hidden") }, word),
+      el("span", { class: "n num", title: g.shared ? "guessed by someone else too" : "" }, g.check ? "·" : g.n),
+      el("span", { class: "w" + (g.word ? "" : " hidden") }, word, g.hint ? el("small", {}, "hint") : g.check ? el("small", {}, "after") : ""),
       el("span", { class: "s num", style: `color:${heat(g)}` }, g.score.toFixed(2)),
       proximity(g),
     );

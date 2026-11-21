@@ -40,9 +40,14 @@ export async function score(word, secret) {
   return { score: s.initialSimilarity, rank: s.percentile ?? null };
 }
 
-/** Semantle's 999 nearest words to the secret, as word -> rank (999 = closest). */
-export async function nearest(secret) {
+/** Semantle's 999 nearest words to the secret: [{word, rank (999 = closest), score}]. */
+export async function neighbours(secret) {
   const t = await get(`/semantle/top1000/${encodeURIComponent(secret)}/en`);
   if (!t?.data?.length) throw new Error(`no top1000 for ${secret}`);
-  return new Map(t.data.map((d) => [d.neighbor, d.percentile]));
+  return t.data.map((d) => ({ word: d.neighbor, rank: d.percentile, score: Math.round(d.similarity * 10000) / 100 }));
+}
+
+/** The same, as word -> rank. */
+export async function nearest(secret) {
+  return new Map((await neighbours(secret)).map((n) => [n.word, n.rank]));
 }
