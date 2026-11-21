@@ -352,7 +352,7 @@ function pastList() {
 
 // Going into a rematch while in voice: the rematch's page joins voice by itself (set by the duel page).
 let intoRematch = () => {};
-const VOICE_INTO = "sd-voice-into";  // sessionStorage: this tab was in voice, heading into that duel
+const VOICE_INTO = "sd-voice-into";  // sessionStorage: "<duel id>|<when>": this tab was in voice, heading into (or reloading) that duel
 
 // Rematch a finished duel on this puzzle; whoever asks first sets it up, and everyone lands in the same one.
 async function rematch(id, puzzle, button) {
@@ -845,10 +845,18 @@ function duelPage(id) {
     es.addEventListener("ping", () => (heard = Date.now()));
     es.addEventListener("signal", (e) => { heard = Date.now(); const m = JSON.parse(e.data); voice.onSignal(m.from, m.data); });
   };
+  // In voice when the page goes (a reload, or into a rematch): the next page here joins voice by itself,
+  // if it comes within 30s. Registered before the voice chat's own pagehide, which leaves voice.
+  const carry = (into) => { try { if (voice.state.status === "on") sessionStorage.setItem(VOICE_INTO, `${into}|${Date.now()}`); } catch {} };
+  addEventListener("pagehide", () => { try { if (!sessionStorage.getItem(VOICE_INTO)) carry(id); } catch {} });
   const voice = voiceChat(base, () => view && voiceBar(view));
-  intoRematch = (next) => { try { if (voice.state.status === "on") sessionStorage.setItem(VOICE_INTO, next); } catch {} };
-  let rejoinVoice = false;  // came here from a rematch while in voice: join once we're a player here
-  try { rejoinVoice = sessionStorage.getItem(VOICE_INTO) === id; sessionStorage.removeItem(VOICE_INTO); } catch {}
+  intoRematch = carry;
+  let rejoinVoice = false;  // join once we're a player here
+  try {
+    const [into, at] = (sessionStorage.getItem(VOICE_INTO) ?? "").split("|");
+    rejoinVoice = into === id && Date.now() - Number(at) < 30_000;
+    sessionStorage.removeItem(VOICE_INTO);
+  } catch {}
   connect();
   setInterval(() => Date.now() - heard > 40_000 && connect(), 5_000);
   document.addEventListener("visibilitychange", () => !document.hidden && Date.now() - heard > 20_000 && connect());
