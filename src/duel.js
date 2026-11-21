@@ -209,6 +209,7 @@ export class Duel {
     const reveal = status === "over" || !!this.players.get(viewerId)?.finish;
     const ended = status === "over" ? this.endedAt() : now;
     const open = this.pause();
+    const mine = new Set(this.players.get(viewerId)?.guesses.map((g) => g.word));
     return {
       id: this.id,
       number: this.puzzle.number,
@@ -230,7 +231,8 @@ export class Duel {
         finish: p.finish && { ...p.finish, time: this.elapsed(p.finish.at) },
         guesses: p.guesses.map((g) => ({
           n: g.n,
-          word: reveal || p.id === viewerId || g.hint ? g.word : null,
+          // an opponent's word shows once you've guessed it too
+          word: reveal || p.id === viewerId || g.hint || mine.has(g.word) ? g.word : null,
           score: g.score,
           rank: g.rank,
           at: g.at,
