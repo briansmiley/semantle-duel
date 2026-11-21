@@ -79,6 +79,7 @@
   #pausebar button { color: var(--ink); border-bottom: 1px solid currentColor; margin-left: .3em; }
   #pausebar .ask { color: var(--hot); }
   #board.paused .side.me ol, #board.paused #guess { filter: blur(6px); pointer-events: none; }
+  .side form.slot { visibility: hidden; }
   .side form .submit { font-size: 1.05rem; border-bottom: 2px solid var(--hot); padding-bottom: 1px; }
   .side form .submit:disabled { color: var(--faint); border-color: var(--rule); cursor: default; }
   #clock { font: 400 clamp(2.6rem, 10vw, 4rem)/1 var(--serif); letter-spacing: -.02em; }
@@ -1044,6 +1045,9 @@ function duelPage(id) {
         render();
       };
       div.append(form);
+    } else if (!mine && v.players.length === 2 && v.players.some((q) => q.id === me) && (v.status === "playing" || v.status === "over")) {
+      // side by side: an empty stand-in for the box, so both lists start at the same height
+      div.append(el("form", { class: "slot", "aria-hidden": "true" }, el("input", { class: "line", tabindex: "-1", disabled: "disabled" }), el("button", { class: "submit", type: "button", tabindex: "-1" }, "guess")));
     }
 
     const ol = el("ol", {});
