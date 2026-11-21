@@ -123,27 +123,32 @@
 
   #board { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2.4rem; margin-top: 1.6rem; align-items: start; }
   #board.crowd { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); row-gap: 1.6rem; }
-  #board.crowd .side.me { grid-row: 1 / span 3; }
-  #board.crowd .side:not(.me) { font-size: .82rem; }
-  #board.crowd .side:not(.me) li.heads { display: none; }
-  #board.crowd .side:not(.me) h2 { font-size: 1.05rem; }
+  #board .others { display: grid; gap: 1.6rem; align-content: start; min-width: 0; }
+  #board .others .side { font-size: .82rem; }
+  #board .others .side li.heads { display: none; }
+  #board .others .side h2 { font-size: 1.05rem; }
   #rivals { display: none; }
   @media (max-width: 700px) {
-    #board, #board.crowd { grid-template-columns: 1fr; gap: 2rem; margin-top: 1.2rem; }
-    #board.crowd .side.me { grid-row: auto; }
-    #board.mine .side:not(.me) { display: none; }
-    #rivals:not([hidden]) { display: block; list-style: none; margin: 1rem 0 0; padding: 0; font-size: .88rem; }
-    .rival { display: block; padding: 0; border-bottom: 1px solid var(--rule); }
-    .rival .sum { width: 100%; text-align: left; display: grid; grid-template-columns: minmax(0, 1fr) auto 4.2em 8em; gap: .7em; align-items: center; padding: .55em 0; }
-    .rival .name { font: 400 1.05rem var(--serif); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .rival .name::before { content: "›"; display: inline-block; width: .9em; color: var(--faint); transition: transform .15s; }
-    .rival.open .name::before { transform: rotate(90deg); }
-    .rival.first .name { color: var(--hot); }
-    .rival .stat { color: var(--faint); font-size: .9em; }
-    .rival.found .stat { color: var(--hot); }
-    .rival .s { text-align: right; }
-    .rival ol { margin: 0 0 .6em 1.1em; font-size: .92em; }
-    .rival ol li:last-child { border-bottom: 0; }
+    /* minmax(0, …): a bare 1fr would grow to its widest row and run off the screen */
+    #board, #board.crowd { grid-template-columns: minmax(0, 1fr); gap: 2rem; margin-top: 1.2rem; }
+    #board.mine .side:not(.me), #board.mine .others { display: none; }
+    /* narrower columns, so the word itself has room */
+    #duel li { grid-template-columns: 1.6em minmax(0, 1fr) 3.9em 6.6em; gap: .5em; }
+    /* everyone else in one strip, a line high however many: leader first, sideways if it overflows */
+    #rivals:not([hidden]) { display: block; margin: .9rem 0 0; }
+    #rivals .strip { display: flex; gap: 1.2rem; overflow-x: auto; scrollbar-width: none; white-space: nowrap; padding: .2rem 0 .4rem; border-bottom: 1px solid var(--rule); }
+    #rivals .strip::-webkit-scrollbar { display: none; }
+    .chip { flex: none; display: inline-flex; align-items: baseline; gap: .35em; padding-bottom: 2px; border-bottom: 2px solid transparent; }
+    .chip.on { border-color: var(--ink); }
+    .chip.fresh { animation: fresh 1.2s ease-out; }
+    .chip .name { font-size: 1.05rem; }
+    .chip.first .name { color: var(--hot); }
+    .chip .s { font-size: .9rem; }
+    .chip .mark { font-size: .78rem; color: var(--faint); }
+    .chip.found .mark { color: var(--hot); }
+    #rivals .open ol { font-size: .92em; margin: .2em 0 0; }
+    #rivals .open:not(:empty) { border-bottom: 1px solid var(--rule); }
+    #rivals .open ol li:last-child { border-bottom: 0; }
   }
   .side h2 { font: 400 1.25rem/1.2 var(--serif); margin: 0 0 .2rem; display: flex; justify-content: space-between; align-items: baseline; }
   .side h2 .stat { font-size: .9rem; color: var(--faint); }
@@ -264,7 +269,7 @@
     <div class="who"><span id="mine"><form id="nameform"><input class="line" id="name" placeholder="your name" maxlength="24" autocomplete="off"></form><span class="me"></span><button type="button" class="pencil" title="change your name" aria-label="change your name"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4"/></svg></button></span><span class="others"></span></div>
     <div><button id="go" disabled>ready</button><span class="wait"></span></div>
   </section>
-  <ol id="rivals" hidden></ol>
+  <div id="rivals" hidden><div class="strip"></div><div class="open"></div></div>
   <section id="board" hidden></section>
 </main>
 
@@ -758,7 +763,7 @@ function duelPage(id) {
   let recall = null, flashRecall = false;  // a word I'd already guessed: shown up top again, like Semantle does
   let note = null;  // {word, msg}: why my last word didn't count
   let picking = false, today = null;  // rematch: choosing a puzzle
-  const open = new Set();  // opponents expanded on a phone
+  let openRival = null;  // on a phone, whose list is open under the strip
   fetch("/today").then((r) => r.json()).then((t) => { today = t.number; if (view) render(); }).catch(() => {});
 
   const join = (name) => post(`${base}/join`, { player: me, name });
@@ -918,10 +923,10 @@ function duelPage(id) {
     board.classList.toggle("crowd", sides.length > 2);
     board.classList.toggle("mine", inIt);
     const focused = document.activeElement?.id === "guess";
-    board.replaceChildren(...sides.map((p) => side(p, v)));
-    const rivals = $("#rivals");
-    rivals.hidden = !inIt;
-    rivals.replaceChildren(...sides.filter((p) => p.id !== me).map((p) => rival(p, v)));
+    // a crowd: the first (you) on the left, everyone else stacked beside
+    const drawn = sides.map((p) => side(p, v));
+    board.replaceChildren(...(sides.length > 2 ? [drawn[0], el("div", { class: "others" }, ...drawn.slice(1))] : drawn));
+    strip(v, sides.filter((p) => p.id !== me), inIt);
     seen = new Set(v.players.flatMap((p) => [...p.guesses.map((g) => `${p.id}:${g.n}`), ...(p.checks ?? []).map((c, k) => `${p.id}:c${k}`)]));
     flashRecall = false;
     if (focused || (v.status === "playing" && inIt && !matchMedia("(hover: none)").matches)) $("#guess")?.focus();
@@ -1110,30 +1115,40 @@ function duelPage(id) {
     return div;
   }
 
-  // phone: one line per opponent, tap to open their list
-  function rival(p, v) {
-    const f = p.finish, n = p.guesses.length;
-    const best = p.guesses.reduce((b, g) => (!b || g.score > b.score ? g : b), null);
-    const last = p.guesses.at(-1);
-    const fresh = last && seen !== null && !seen.has(`${p.id}:${last.n}`);
-    const place = f?.found ? standings(v).indexOf(p) + 1 : 0;
-    const li = el("li", { class: ["rival", open.has(p.id) && "open", fresh && "fresh", place === 1 && "first", f?.found && "found"].filter(Boolean).join(" ") });
-    const sum = el("button", { class: "sum", type: "button" },
-      el("span", { class: "name" }, p.name),
-      el("span", { class: "stat num" }, f?.found ? `${ordinal(place)} · ${mmss(f.time)} · ${n}` : f ? `gave up · ${n}` : n),
-      el("span", { class: "s num", style: best ? `color:${heat(best)}` : "" }, best ? best.score.toFixed(2) : ""),
-      best ? proximity(best) : el("span", {}),
-    );
-    sum.onclick = () => { open.has(p.id) ? open.delete(p.id) : open.add(p.id); render(); };
-    li.append(sum);
-    if (open.has(p.id)) {
-      const ol = el("ol", {});
-      if (last && n > 1) ol.append(row(last, p, v, true));
-      if (f && !f.found && v.secret) ol.append(el("li", { class: "missed" }, el("span", { class: "n" }, ""), el("span", { class: "w" }, v.secret), el("span", { class: "s num" }, "100.00"), el("span", { class: "p" }, "😞")));
-      for (const g of [...p.guesses].sort((a, b) => b.score - a.score)) ol.append(row(g, p, v, false));
-      li.append(ol);
-    }
-    return li;
+  // phone: everyone else in one strip (finished by place, then by best score); tap a name for their list
+  function strip(v, others, inIt) {
+    const box = $("#rivals");
+    box.hidden = !inIt || !others.length;
+    if (box.hidden) return;
+    const order = standings(v);
+    const best = (p) => p.guesses.reduce((b, g) => (!b || g.score > b.score ? g : b), null);
+    const key = (p) => (p.finish?.found ? order.indexOf(p) - 1e6 : p.finish ? 1e6 : -(best(p)?.score ?? -1e3));
+    const sorted = [...others].sort((a, b) => key(a) - key(b));
+    if (openRival && !others.some((p) => p.id === openRival)) openRival = null;
+    const lead = sorted[0];
+    $("#rivals .strip").replaceChildren(...sorted.map((p) => {
+      const f = p.finish, b = best(p), last = p.guesses.at(-1);
+      const place = f?.found ? order.indexOf(p) + 1 : 0;
+      const fresh = last && seen !== null && !seen.has(`${p.id}:${last.n}`);
+      const first = place === 1 || (!order.some((q) => q.finish?.found) && p === lead && b);
+      const chip = el("button", { type: "button", class: ["chip", openRival === p.id && "on", fresh && "fresh", first && "first", f?.found && "found"].filter(Boolean).join(" ") },
+        el("span", { class: "name" }, p.name),
+        f?.found ? el("span", { class: "mark num" }, `${ordinal(place)} · ${mmss(f.time)}`)
+        : f ? el("span", { class: "mark" }, "gave up")
+        : el("span", { class: "s num", style: b ? `color:${heat(b)}` : "" }, b ? b.score.toFixed(2) : "–"),
+      );
+      chip.onclick = () => { openRival = openRival === p.id ? null : p.id; render(); };
+      return chip;
+    }));
+    const p = others.find((q) => q.id === openRival);
+    const box2 = $("#rivals .open");
+    if (!p) return box2.replaceChildren();
+    const f = p.finish, last = p.guesses.at(-1), ol = el("ol", {});
+    if (last && p.guesses.length > 1) ol.append(row(last, p, v, true));
+    if (f && !f.found && v.secret) ol.append(el("li", { class: "missed" }, el("span", { class: "n" }, ""), el("span", { class: "w" }, v.secret), el("span", { class: "s num" }, "100.00"), el("span", { class: "p" }, "😞")));
+    for (const g of [...p.guesses].sort((a, b) => b.score - a.score)) ol.append(row(g, p, v, false));
+    if (!p.guesses.length) ol.append(el("li", { class: "more" }, "no guesses yet"));
+    box2.replaceChildren(ol);
   }
 
   function row(g, p, v, isLatest, isAgain = false) {
