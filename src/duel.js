@@ -272,4 +272,35 @@ export class Duel {
   }
 }
 
+/**
+ * A room's record over its finished rounds: each player's wins (found it first) and rounds played,
+ * and for each pair who played the same round, who placed higher (finding it beats giving up; a faster
+ * find beats a slower one; both giving up counts for neither).
+ * @param {Duel[]} rounds in order
+ * @returns {{rounds:number, players:Record<string,{name:string, wins:number, played:number}>, h2h:Record<string,[number,number]>}}
+ *   h2h is keyed "a|b" with a < b: [a's wins, b's wins]
+ */
+export function tally(rounds, now) {
+  const players = {}, h2h = {};
+  let n = 0;
+  for (const d of rounds) {
+    if (d.status(now) !== "over") continue;
+    n++;
+    const ps = [...d.players.values()];
+    const found = ps.filter((p) => p.finish?.found).sort((a, b) => a.finish.at - b.finish.at);
+    for (const p of ps) {
+      players[p.id] ??= { name: p.name, wins: 0, played: 0 };
+      players[p.id].name = p.name;  // the latest
+      players[p.id].played++;
+    }
+    if (found[0]) players[found[0].id].wins++;
+    const place = (p) => (p.finish?.found ? found.indexOf(p) : Infinity);
+    for (const a of ps) for (const b of ps) {
+      if (a.id >= b.id || place(a) === place(b)) continue;
+      (h2h[`${a.id}|${b.id}`] ??= [0, 0])[place(a) < place(b) ? 0 : 1]++;
+    }
+  }
+  return { rounds: n, players, h2h };
+}
+
 export class DuelError extends Error {}
