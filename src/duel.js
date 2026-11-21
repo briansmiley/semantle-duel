@@ -97,12 +97,21 @@ export class Duel {
 
   /** End an abandoned duel: anyone still playing gives up as of the last move. Returns true if it did. */
   expire(now) {
-    if (this.status(now) !== "playing" || this.pause()) return false;
-    const ps = [...this.players.values()];
-    const last = Math.max(this.startsAt, ...ps.flatMap((p) => [p.finish?.at ?? 0, ...p.guesses.map((g) => g.at)]));
+    if (this.status(now) !== "playing") return false;
+    const last = this.lastMove();
     if (now - last < ABANDON_MS) return false;
-    for (const p of ps) p.finish ??= { at: last, found: false };
+    // paused and left, too: the pause ends where the last of it happened
+    const open = this.pause();
+    if (open) open.to = Math.max(open.from, last);
+    for (const p of this.players.values()) p.finish ??= { at: last, found: false };
     return true;
+  }
+
+  /** When anything last happened in it: the start, a guess, a finish, a pause or resume. */
+  lastMove() {
+    const ps = [...this.players.values()];
+    return Math.max(this.startsAt ?? this.createdAt, ...ps.flatMap((p) => [p.finish?.at ?? 0, ...p.guesses.map((g) => g.at)]),
+      ...this.pauses.flatMap((p) => [p.from, p.to ?? 0]));
   }
 
   /** In the lobby, or late: until it's over anyone can join, on the same clock as everyone else. */
