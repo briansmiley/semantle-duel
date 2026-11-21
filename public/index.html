@@ -264,8 +264,7 @@
   <h1><span class="lead">semantle</span> <span class="roll"><span><i>duel</i></span></span></h1>
   <nav>
     <button data-puzzle="today">today’s word</button>
-    <button data-puzzle="random" class="quiet" title="a past Semantle puzzle">random</button>
-    <button data-puzzle="new" class="quiet" title="a word that isn’t a Semantle puzzle">new word</button>
+    <button data-puzzle="random" class="quiet">random word</button>
     <button data-puzzle="set" class="quiet" title="you pick the word and watch">set a word</button>
     <a href="/archive" class="quiet">archive</a>
   </nav>
@@ -360,7 +359,7 @@ function pastList() {
   if (!list.length) return null;
   return el("ol", { class: "past" }, ...list.map((d) => el("li", {},
     el("a", { href: `/d/${d.id}?round` },  // that round itself, not the room's latest
-      el("span", { class: "num" }, d.number ? `#${d.number}` : d.mode === "set" ? "set" : "new"),
+      el("span", { class: "num" }, d.number ? `#${d.number}` : d.mode === "set" ? "set" : "random"),
       el("span", {}, `vs ${d.others.join(", ")}`),
       el("span", { class: d.place === 1 ? "w" : "" },
         d.found === true ? `${d.place ? ordinal(d.place) : "found"} · ${d.secret} · ${mmss(d.time)}`
@@ -377,7 +376,7 @@ const VOICE_INTO = "sd-voice-into";  // sessionStorage: "<duel id>|<when>": this
 // Rematch a finished duel on this puzzle; whoever asks first sets it up, and everyone lands in the same one.
 async function rematch(id, puzzle, button, mode) {
   button.disabled = true;
-  const r = await post(`/d/${id}/rematch`, { player: me, puzzle, mode });
+  const r = await post(`/d/${id}/rematch`, { player: me, puzzle, mode, avoid: mode === "random" ? playedWords() : undefined });
   // the room's link: it opens the rematch
   if (r.view?.next) { intoRematch(r.view.next); location.href = `/d/${r.view.room ?? r.view.next}`; } else button.disabled = false;
 }
@@ -753,8 +752,8 @@ else {
   for (const b of document.querySelectorAll("#home nav button")) {
     const kind = b.dataset.puzzle;
     if (kind === "set") b.onclick = () => { $("#setword").hidden = false; $("#setword input").focus(); };
-    else if (kind === "new") b.onclick = () => newDuel(undefined, b, { mode: "new" });
-    else b.onclick = async () => newDuel(kind === "random" ? await randomUnplayed() : undefined, b);
+    else if (kind === "random") b.onclick = () => newDuel(undefined, b, { mode: "random", avoid: playedWords() });
+    else b.onclick = () => newDuel(undefined, b);
   }
   // set a word: you make the duel and watch it, seeing every word
   $("#setword").onsubmit = async (e) => {
@@ -767,13 +766,9 @@ else {
   };
 }
 
-// A past puzzle (not today's) that this browser hasn't duelled yet.
-async function randomUnplayed() {
-  const { number: today } = await (await fetch("/today")).json();
-  const played = new Set(pastDuels().map((d) => d.number));
-  const fresh = [];
-  for (let n = 1; n < today; n++) if (!played.has(n)) fresh.push(n);
-  return fresh.length ? fresh[Math.floor(Math.random() * fresh.length)] : 1 + Math.floor(Math.random() * (today - 1));
+// Words this browser has duelled on, for a random draw to skip.
+function playedWords() {
+  return pastDuels().map((d) => d.secret).filter(Boolean);
 }
 
 /* ---------- archive ---------- */
@@ -940,12 +935,14 @@ function duelPage(id) {
     }
     remember(v);
     const setting = v.setter?.id === me;  // you set the word: you watch, seeing every word
-    // which word: Semantle's puzzle (linked), a new one, or one somebody set
-    $(".no").textContent = v.number ? `#${v.number}${v.number === today ? " (today)" : ""}`
-      : v.mode === "set" ? (setting ? `you set “${v.secret}”` : `set by ${v.setter?.name ?? "someone"}`) : "a new word";
-    if (!v.number) $(".no").removeAttribute("href");
+    // which word: Semantle's puzzle (linked), one somebody set, or a random draw, which says only that until
+    // the word is out (then, if it was one of Semantle's, its number and link)
+    const numbered = v.number && (v.mode !== "random" || v.secret);
+    $(".no").textContent = numbered ? `#${v.number}${v.number === today ? " (today)" : ""}`
+      : v.mode === "set" ? (setting ? `you set “${v.secret}”` : `set by ${v.setter?.name ?? "someone"}`) : "a random word";
+    if (!numbered) $(".no").removeAttribute("href");
     // semantle.com's archive only has past puzzles; today's is its front page
-    if (v.number) $(".no").href = v.number === today ? "https://semantle.com/" : `https://semantle.com/archive/game?num=${v.number}`;
+    if (numbered) $(".no").href = v.number === today ? "https://semantle.com/" : `https://semantle.com/archive/game?num=${v.number}`;
     const inIt = v.players.some((p) => p.id === me);
     const lobby = v.status === "lobby";
 
@@ -1121,8 +1118,7 @@ function duelPage(id) {
       };
       kids.push(el("span", { class: "pick" },
         el("span", {}, "rematch on"),
-        go("a random one", randomUnplayed),
-        (() => { const b = el("button", { type: "button" }, "a new word"); b.onclick = () => rematch(v.id, undefined, b, "new"); return b; })(),
+        (() => { const b = el("button", { type: "button" }, "a random word"); b.onclick = () => rematch(v.id, undefined, b, "random"); return b; })(),
         today && today !== v.number ? go("today’s", async () => today) : "",
         el("a", { href: `/archive?rematch=${v.id}` }, "the archive"),
       ));

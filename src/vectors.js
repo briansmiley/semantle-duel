@@ -5,7 +5,7 @@ import { open, readFile } from "node:fs/promises";
 
 const DIM = 300, SIZE = DIM * 4;
 
-/** @returns {Promise<{similarity(a:string, b:string): Promise<number|null>, randomWord(): string} | null>} null if the files aren't there */
+/** @returns {Promise<{similarity(a:string, b:string): Promise<number|null>} | null>} null if the files aren't there */
 export async function load(dir) {
   let words, rows, fh;
   try {
@@ -42,23 +42,8 @@ export async function load(dir) {
     return v;
   };
 
-  // Words for a "new word" duel: common but not too common (the file keeps Google's order, most frequent
-  // first; rows 1,000-15,000 give words like festival, satellite, wardrobe), 4-10 letters, and none of the
-  // endings that make for plurals, adverbs, participles or comparatives. About 5,500 of them.
-  let pool = null;
-  const word = (i) => words.toString("utf8", starts[i], starts[i + 1] - 1);
-  const randomWord = () => {
-    pool ??= Array.from({ length: rowOf.length }, (_, i) => i).filter((i) => {
-      if (rowOf[i] < 1000 || rowOf[i] >= 15000) return false;
-      const w = word(i);
-      return /^[a-z]{4,10}$/.test(w) && !/(ly|ing|ed|s|er|est)$/.test(w);
-    });
-    return word(pool[Math.floor(Math.random() * pool.length)]);
-  };
-
   console.log(`vectors: ${rowOf.length} words`);
   return {
-    randomWord,
     async similarity(a, b) {
       const [x, y] = await Promise.all([vector(a), vector(b)]);
       if (!x || !y) return null;

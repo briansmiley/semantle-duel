@@ -6,6 +6,11 @@ import * as semantle from "./semantle.js";
 import * as vectors from "./vectors.js";
 import { feedback } from "./feedback.js";
 
+// What a "random word" duel draws from (scripts/build-words.js): Semantle's archive answers, word -> number,
+// and our own extra words, filtered for fitness.
+const WORDS = JSON.parse(await readFile(new URL("./words.json", import.meta.url), "utf8"));
+const DRAW = [...Object.keys(WORDS.archive), ...WORDS.extra];
+
 const PORT = Number(process.env.PORT ?? 8080);
 const HOST = process.env.HOST ?? "127.0.0.1";
 const PAGE = new URL("../public/index.html", import.meta.url);
@@ -116,24 +121,21 @@ function json(res, code, obj) {
 }
 
 /**
- * A new duel on Semantle's puzzle `which` (today's if not given), or with `mode: "new"` a fresh word from the
- * vectors, or with `word` one that `setter` chose (they watch). A word must be one Semantle knows.
+ * A new duel on Semantle's puzzle `which` (today's if not given), or with `mode: "random"` a word drawn from
+ * our list (not one in `avoid`), or with `word` one that `setter` chose (they watch; Semantle must know it).
  */
-async function createDuel(which, room = null, { mode, word, setter } = {}) {
+async function createDuel(which, room = null, { mode, word, setter, avoid } = {}) {
   const today = semantle.todaysNumber();
   let pick;
   if (word !== undefined) {
     const w = String(word).trim().toLowerCase();
     if (!/^[a-z][a-z'-]*$/.test(w) || !(await knows(w))) throw new DuelError("Semantle doesn’t know that word");
     pick = { number: null, secret: w, mode: "set" };
-  } else if (mode === "new") {
-    const v = await local;
-    for (let i = 0; v && i < 6 && !pick; i++) {
-      const w = v.randomWord();
-      if (await knows(w)) pick = { number: null, secret: w, mode: "new" };
-    }
-    // no vectors here, or no luck: a random past puzzle instead
-    pick ??= await puzzle(1 + Math.floor(Math.random() * (today - 1)));
+  } else if (mode === "random") {
+    const skip = new Set(Array.isArray(avoid) ? avoid.slice(0, 500).map(String) : []);
+    let w = DRAW[Math.floor(Math.random() * DRAW.length)];
+    for (let i = 0; i < 50 && skip.has(w); i++) w = DRAW[Math.floor(Math.random() * DRAW.length)];
+    pick = { number: WORDS.archive[w] ?? null, secret: w, mode: "random" };
   } else {
     pick = await puzzle(Number.isInteger(which) && which >= 1 && which <= today ? which : today);
   }
@@ -164,8 +166,8 @@ async function handle(req, res) {
   }
 
   if (req.method === "POST" && url.pathname === "/duels") {
-    const { puzzle: which, mode, word, player, name } = await body(req);
-    return json(res, 200, { id: await createDuel(which, null, { mode, word, setter: { id: player, name } }) });
+    const { puzzle: which, mode, word, player, name, avoid } = await body(req, 16_384);
+    return json(res, 200, { id: await createDuel(which, null, { mode, word, avoid, setter: { id: player, name } }) });
   }
 
   if (parts[0] !== "d" || parts.length !== 3) return json(res, 404, { error: "not found" });
@@ -212,7 +214,7 @@ async function handle(req, res) {
   }
 
   if (req.method !== "POST") return json(res, 405, { error: "method" });
-  const msg = await body(req, action === "signal" ? 32_768 : 4096);  // an SDP offer runs to a few KB
+  const msg = await body(req, action === "signal" ? 32_768 : action === "rematch" ? 16_384 : 4096);  // an SDP offer runs to a few KB; a rematch carries words to avoid
   const player = String(msg.player ?? "");
   const now = Date.now();
 
@@ -251,7 +253,7 @@ async function handle(req, res) {
     if (!duel.players.has(player)) throw new DuelError("not in this duel");
     // first one to ask picks the puzzle; everyone else is pointed at the same duel
     if (!duel.next) {
-      room.rematch ??= createDuel(msg.puzzle, duel.room, { mode: msg.mode }).then((id) => (duel.next = id)).finally(() => (room.rematch = null));
+      room.rematch ??= createDuel(msg.puzzle, duel.room, { mode: msg.mode, avoid: [...(Array.isArray(msg.avoid) ? msg.avoid : []), duel.puzzle.secret] }).then((id) => (duel.next = id)).finally(() => (room.rematch = null));
       await room.rematch;
     }
   } else if (action === "hint") {
