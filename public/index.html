@@ -929,7 +929,7 @@ function duelPage(id) {
     strip(v, sides.filter((p) => p.id !== me), inIt);
     seen = new Set(v.players.flatMap((p) => [...p.guesses.map((g) => `${p.id}:${g.n}`), ...(p.checks ?? []).map((c, k) => `${p.id}:c${k}`)]));
     flashRecall = false;
-    if (focused || (v.status === "playing" && inIt && !matchMedia("(hover: none)").matches)) $("#guess")?.focus();
+    if (focused || (v.status === "playing" && inIt && !matchMedia("(hover: none)").matches)) $("#guess")?.focus({ preventScroll: true });  // a redraw keeps the box focused but never scrolls you back up to it
   }
 
   function pausebar(v, mine) {
