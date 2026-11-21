@@ -209,6 +209,25 @@ async function handle(req, res) {
       room.rematch ??= createDuel(msg.puzzle).then((id) => (duel.next = id)).finally(() => (room.rematch = null));
       await room.rematch;
     }
+  } else if (action === "hint") {
+    if (duel.askHint(player, !!msg.want, now)) {
+      // Everyone agreed: a Semantle neighbour a third of the way from the best anyone has (by rank) to the word.
+      const best = duel.bestRank();
+      if (best >= 999) { duel.hintAsks = []; await save(duel); broadcast(room); return json(res, 409, { error: "nothing closer but the word itself" }); }
+      const near = await semantle.neighbours(duel.puzzle.secret);
+      const target = Math.min(999, best + Math.max(1, Math.ceil((999 - best) / 3)));
+      const pick = near.filter((n) => n.rank >= target).sort((a, b) => a.rank - b.rank)[0];
+      if (pick) duel.giveHint(pick.word, pick, Date.now());
+    }
+  } else if (action === "guess" && duel.players.get(player)?.finish) {
+    // finished: words are only checked, for their score, outside the race
+    const word = String(msg.word ?? "").trim().toLowerCase();
+    const why = duel.checkRefusal(player, word);
+    if (why) return json(res, 409, { error: why });
+    if (!room.scores.has(word)) room.scores.set(word, await score(word, duel.puzzle.secret));
+    const result = room.scores.get(word);
+    if (!result) return json(res, 409, { error: "unknown word" });
+    duel.check(player, word, result, Date.now());
   } else if (action === "guess") {
     const word = String(msg.word ?? "").trim().toLowerCase();
     const why = duel.refusal(player, word, now);
