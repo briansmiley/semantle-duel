@@ -47,6 +47,12 @@ export async function neighbours(secret) {
   return t.data.map((d) => ({ word: d.neighbor, rank: d.percentile, score: Math.round(d.similarity * 10000) / 100 }));
 }
 
+/** Semantle's own hint for someone whose best rank so far is `best` (0: not in the top 1000): a word, or null. */
+export async function hint(secret, best) {
+  const h = await get(`/semantle/hint/${encodeURIComponent(secret)}/${best}/en`);
+  return h?.success && h.hintWord ? String(h.hintWord) : null;
+}
+
 /** The same, as word -> rank. */
 export async function nearest(secret) {
   return new Map((await neighbours(secret)).map((n) => [n.word, n.rank]));
