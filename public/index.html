@@ -173,10 +173,7 @@
   li.shared .n { color: var(--ink); font-weight: 600; }  /* someone else guessed it too */
   li .w small { color: var(--hot); font-size: .72em; font-style: italic; margin-left: .35em; }
   li.check .w { font-style: italic; }
-  li.pending { color: var(--faint); }
-  /* only shows if scoring is slow, so a quick guess doesn't flash a grey row first */
-  @media (prefers-reduced-motion: no-preference) { li.pending { animation: late .2s .35s both; } }
-  @keyframes late { from { opacity: 0; } }
+  li.pending { color: var(--faint); }  /* takes the latest row's place as is, line and all, until the score comes */
   li .w { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   li .w.hidden { filter: blur(5px); user-select: none; color: var(--faint); }
   li .s { text-align: right; }
