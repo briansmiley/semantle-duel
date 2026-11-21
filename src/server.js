@@ -1,7 +1,7 @@
 import http from "node:http";
 import { readFile, writeFile, rename, mkdir } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
-import { Duel, DuelError } from "./duel.js";
+import { Duel, DuelError, tally } from "./duel.js";
 import * as semantle from "./semantle.js";
 import * as vectors from "./vectors.js";
 import { feedback } from "./feedback.js";
@@ -159,6 +159,13 @@ async function handle(req, res) {
       r = next;
     }
     return json(res, 200, { id: r.duel.id });
+  }
+
+  // The room's record: its rounds from the first, through the rematch chain.
+  if (req.method === "GET" && action === "tally") {
+    const rounds = [];
+    for (let r = await loadRoom(duel.room); r && rounds.length < 1000; r = r.duel.next ? await loadRoom(r.duel.next) : null) rounds.push(r.duel);
+    return json(res, 200, tally(rounds, Date.now()));
   }
 
   if (req.method === "GET" && action === "events") {

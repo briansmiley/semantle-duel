@@ -172,6 +172,9 @@
   #after .quiet { color: var(--faint); }
   #after .pick { display: contents; }
   #after .pick span { color: var(--faint); }
+  #tally { margin: .3rem 0 .6rem; color: var(--faint); font-size: .95rem; display: grid; gap: .15rem; }
+  #tally b { font-weight: 400; color: var(--ink); }
+  #tally .lead b { color: var(--hot); }
 
   ol { list-style: none; margin: .5em 0 0; padding: 0; }
   li { display: grid; grid-template-columns: 2em minmax(0, 1fr) 4.6em 8em; align-items: center; gap: .6em; padding: .32em 0; border-bottom: 1px solid var(--rule); }
@@ -272,6 +275,7 @@
   <form id="watch" hidden><span>you’re watching.</span><input class="line" id="latename" placeholder="your name" maxlength="24" autocomplete="off"><button class="go">join in</button></form>
   <div id="banner" hidden></div>
   <nav id="after" hidden></nav>
+  <div id="tally" hidden></div>
   <section id="lobby" hidden>
     <div class="who"><span id="mine"><form id="nameform"><input class="line" id="name" placeholder="your name" maxlength="24" autocomplete="off"></form><span class="me"></span><button type="button" class="pencil" title="change your name" aria-label="change your name"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4"/></svg></button></span><span class="others"></span></div>
     <div><button id="go" disabled>ready</button><span class="wait"></span></div>
@@ -943,6 +947,7 @@ function duelPage(id) {
         : ["you gave up. it was ", el("b", {}, v.secret)]));
     }
     after(v, mine);
+    record(v, mine);
     pausebar(v, mine);
     voiceBar(v);
 
@@ -1029,6 +1034,31 @@ function duelPage(id) {
       kids.push(btn(st.muted ? "unmute" : "mute", () => voice.setMuted(!st.muted)), btn("leave", () => voice.leave()));
     }
     bar.replaceChildren(...kids);
+  }
+
+  // The room's record so far, between rounds and once you've finished: wins, and how you stand against each other player.
+  let book = null, booked = null;  // the tally, and the duel and status it was fetched for
+  function record(v, mine) {
+    const box = $("#tally");
+    const when = `${v.id}:${v.status}`;
+    if (booked !== when) {
+      booked = when;
+      fetch(`${base}/tally`).then((r) => r.json()).then((t) => { book = t; if (view) record(view, view.players.find((p) => p.id === me)); }).catch(() => {});
+    }
+    box.hidden = !book?.rounds || !(v.status === "lobby" || v.status === "over" || mine?.finish);
+    if (box.hidden) return;
+    const ps = Object.entries(book.players).sort(([, a], [, b]) => b.wins - a.wins || b.played - a.played);
+    const top = ps[0]?.[1].wins;
+    const line1 = el("span", {}, `this room · ${book.rounds} ${book.rounds === 1 ? "round" : "rounds"}: `,
+      ...ps.flatMap(([id, p], i) => [i ? " · " : "", el("span", { class: top && p.wins === top ? "lead" : "" }, el("b", {}, id === me ? "you" : p.name), ` ${p.wins}`)]));
+    const vs = ps.filter(([id]) => id !== me).map(([id, p]) => {
+      const [k, flip] = me < id ? [`${me}|${id}`, false] : [`${id}|${me}`, true];
+      const h = book.h2h[k];
+      if (!h) return null;
+      const [w, l] = flip ? [h[1], h[0]] : h;
+      return `vs ${p.name} ${w}–${l}`;
+    }).filter(Boolean);
+    box.replaceChildren(line1, ...(vs.length ? [el("span", {}, "you ", vs.join(" · "))] : []));
   }
 
   // once you're done: rematch (same opponents, a puzzle of your choosing) or home
