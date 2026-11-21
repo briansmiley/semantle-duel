@@ -25,6 +25,7 @@ export class Duel {
     /** @type {number|null} */ this.startsAt = null;
     this.createdAt = now;
     /** @type {string|null} the rematch duel, once someone asks for one */ this.next = null;
+    /** the room: the first duel's id, kept by every rematch after it; its link always opens the latest round */ this.room = id;
     /** @type {Pause[]} */ this.pauses = [];
     /** @type {Record<string, number>} when each player was last heard from */ this.seen = {};
     /** @type {string[]} players asking for a hint; given once everyone still racing has asked */ this.hintAsks = [];
@@ -225,6 +226,7 @@ export class Duel {
       secret: reveal ? this.puzzle.secret : null,
       max: MAX_PLAYERS,
       next: this.next,
+      room: this.room,
       you: viewerId,
       players: [...this.players.values()].map((p) => ({
         id: p.id,
@@ -248,7 +250,7 @@ export class Duel {
   }
 
   toJSON() {
-    return { id: this.id, puzzle: this.puzzle, players: [...this.players.values()], startsAt: this.startsAt, createdAt: this.createdAt, next: this.next, pauses: this.pauses, seen: this.seen, hintAsks: this.hintAsks };
+    return { id: this.id, puzzle: this.puzzle, players: [...this.players.values()], startsAt: this.startsAt, createdAt: this.createdAt, next: this.next, room: this.room, pauses: this.pauses, seen: this.seen, hintAsks: this.hintAsks };
   }
 
   static fromJSON(o) {
@@ -256,6 +258,7 @@ export class Duel {
     for (const p of o.players) d.players.set(p.id, { finish: null, ...p });
     d.startsAt = o.startsAt;
     d.next = o.next ?? null;
+    d.room = o.room ?? o.id;
     d.pauses = o.pauses ?? [];
     d.seen = o.seen ?? {};
     d.hintAsks = o.hintAsks ?? [];

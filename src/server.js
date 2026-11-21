@@ -110,11 +110,12 @@ function json(res, code, obj) {
   res.end(JSON.stringify(obj));
 }
 
-async function createDuel(which) {
+async function createDuel(which, room = null) {
   const today = semantle.todaysNumber();
   const number = Number.isInteger(which) && which >= 1 && which <= today ? which : today;
   const id = newId();
   const duel = new Duel(id, await puzzle(number), Date.now());
+  if (room) duel.room = room;
   rooms.set(id, { duel, listeners: new Set(), scores: new Map(), voice: new Map() });
   await save(duel);
   return id;
@@ -147,6 +148,18 @@ async function handle(req, res) {
   if (!room) return json(res, 404, { error: "no such duel" });
   const { duel } = room;
   const action = parts[2];
+
+  // A room's link opens its latest round, unless you're still racing an earlier one.
+  if (req.method === "GET" && action === "head") {
+    const player = url.searchParams.get("player") ?? "";
+    let r = room;
+    for (let i = 0; i < 100 && r.duel.next && !r.duel.racing(player, Date.now()); i++) {
+      const next = await loadRoom(r.duel.next);
+      if (!next) break;
+      r = next;
+    }
+    return json(res, 200, { id: r.duel.id });
+  }
 
   if (req.method === "GET" && action === "events") {
     const player = url.searchParams.get("player") ?? "";
@@ -206,7 +219,7 @@ async function handle(req, res) {
     if (!duel.players.has(player)) throw new DuelError("not in this duel");
     // first one to ask picks the puzzle; everyone else is pointed at the same duel
     if (!duel.next) {
-      room.rematch ??= createDuel(msg.puzzle).then((id) => (duel.next = id)).finally(() => (room.rematch = null));
+      room.rematch ??= createDuel(msg.puzzle, duel.room).then((id) => (duel.next = id)).finally(() => (room.rematch = null));
       await room.rematch;
     }
   } else if (action === "hint") {
