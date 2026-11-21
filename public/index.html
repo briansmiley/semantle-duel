@@ -117,6 +117,8 @@
   #mine .pencil:hover { color: var(--ink); }
   #mine .pencil svg { width: .8em; height: .8em; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
   #lobby .who span.empty { color: var(--faint); }
+  #lobby .who .away { color: var(--faint); }
+  #lobby .who .away small { font-style: italic; font-size: .7em; }
   #lobby .who .ok { color: var(--hot); font-size: .8em; margin-left: .25em; }
   #lobby .who .me .ok { display: inline-block; }  /* out of the name's underline */
   #lobby .wait { color: var(--faint); font-style: italic; margin-left: 1rem; }
@@ -955,7 +957,9 @@ function duelPage(id) {
       const mine = v.players.find((p) => p.id === me);
       $("#mine").hidden = setting || (!mine && v.players.length >= v.max);
       $("#mine .me").replaceChildren($("#name").value.trim() || mine?.name || "", ...(mine ? [tick(mine)] : []));
-      const others = v.players.filter((p) => p.id !== me).map((p) => el("span", {}, el("span", {}, p.name), tick(p)));
+      // someone whose page has closed: greyed, "away"; the server drops them if they don't come back soon
+      const away = (p) => v.here && !v.here.includes(p.id);
+      const others = v.players.filter((p) => p.id !== me).map((p) => el("span", { class: away(p) ? "away" : "" }, el("span", {}, p.name), tick(p), away(p) ? el("small", {}, " away") : ""));
       if (v.players.length + (mine ? 0 : 1) < v.max) others.push(el("span", { class: "empty" }, "…"));
       $("#lobby .who .others").replaceChildren(...others);
       // everyone says ready, then the countdown starts by itself
