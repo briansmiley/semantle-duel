@@ -16,7 +16,7 @@ export const AWAY_MS = Number(process.env.AWAY_MS ?? 90_000);
 /** @typedef {{id:string, name:string, guesses:Guess[], finish:Finish|null, ready?:boolean, checks?:Check[]}} Player  ready: in the lobby, said they are set to go */
 
 export class Duel {
-  /** @param {string} id @param {{number:number, secret:string, closest:number, tenth:number, thousandth:number}} puzzle */
+  /** @param {string} id @param {{number:number|null, secret:string, mode?:"new"|"set"}} puzzle  number: Semantle's; null for a new word or one someone set */
   constructor(id, puzzle, now) {
     this.id = id;
     this.puzzle = puzzle;
@@ -25,6 +25,7 @@ export class Duel {
     /** @type {number|null} */ this.startsAt = null;
     this.createdAt = now;
     /** @type {string|null} the rematch duel, once someone asks for one */ this.next = null;
+    /** @type {{id:string, name:string}|null} whoever set the word (a "set" duel): watches, sees every word, doesn't play */ this.setter = null;
     /** the room: the first duel's id, kept by every rematch after it; its link always opens the latest round */ this.room = id;
     /** @type {Pause[]} */ this.pauses = [];
     /** @type {Record<string, number>} when each player was last heard from */ this.seen = {};
@@ -109,6 +110,7 @@ export class Duel {
     const clean = String(name ?? "").trim().slice(0, 24) || "player";
     const p = this.players.get(playerId);
     if (p) return void (p.name = clean);
+    if (this.setter?.id === playerId) throw new DuelError("you set the word");
     if (this.status(now) === "over") throw new DuelError("it's over");
     if (this.players.size >= MAX_PLAYERS) throw new DuelError("full");
     this.players.set(playerId, { id: playerId, name: clean, guesses: [], finish: null });
@@ -209,13 +211,15 @@ export class Duel {
   /** What one viewer may see: everything once they've finished (or it's over), otherwise only scores of others. */
   viewFor(viewerId, now) {
     const status = this.status(now);
-    const reveal = status === "over" || !!this.players.get(viewerId)?.finish;
+    const reveal = status === "over" || !!this.players.get(viewerId)?.finish || this.setter?.id === viewerId;
     const ended = status === "over" ? this.endedAt() : now;
     const open = this.pause();
     const mine = new Set(this.players.get(viewerId)?.guesses.map((g) => g.word));
     return {
       id: this.id,
       number: this.puzzle.number,
+      mode: this.puzzle.mode ?? "semantle",
+      setter: this.setter,
       status,
       now,
       startsAt: this.startsAt,
@@ -250,7 +254,7 @@ export class Duel {
   }
 
   toJSON() {
-    return { id: this.id, puzzle: this.puzzle, players: [...this.players.values()], startsAt: this.startsAt, createdAt: this.createdAt, next: this.next, room: this.room, pauses: this.pauses, seen: this.seen, hintAsks: this.hintAsks };
+    return { id: this.id, puzzle: this.puzzle, players: [...this.players.values()], startsAt: this.startsAt, createdAt: this.createdAt, next: this.next, room: this.room, setter: this.setter, pauses: this.pauses, seen: this.seen, hintAsks: this.hintAsks };
   }
 
   static fromJSON(o) {
@@ -259,6 +263,7 @@ export class Duel {
     d.startsAt = o.startsAt;
     d.next = o.next ?? null;
     d.room = o.room ?? o.id;
+    d.setter = o.setter ?? null;
     d.pauses = o.pauses ?? [];
     d.seen = o.seen ?? {};
     d.hintAsks = o.hintAsks ?? [];
