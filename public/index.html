@@ -70,7 +70,9 @@
   #archive .grid button.played b { color: var(--hot); }
   #home .past { margin: 1rem auto 0; padding: 0; list-style: none; text-align: left; font-size: .9rem; width: min(100%, 26rem); }
   #home .past li { display: block; padding: 0; border: 0; }
-  #home .past a { display: grid; grid-template-columns: 3.4rem 1fr auto; gap: .8rem; padding: .35rem 0; color: var(--faint); text-decoration: none; border-bottom: 1px solid var(--rule); }
+  #home .open h3 { font: italic 400 .9rem var(--serif); color: var(--faint); margin: 0 auto .2rem; width: min(100%, 26rem); text-align: left; }
+  #home .open .past { margin-top: 0; }
+  #home .past a { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: .8rem; padding: .35rem 0; color: var(--faint); text-decoration: none; border-bottom: 1px solid var(--rule); }
   #home .past a:hover { color: var(--ink); }
   #home .past .w { color: var(--hot); }
 
@@ -113,6 +115,7 @@
   #lobby .who .others { display: contents; }
   #mine { display: inline-flex; align-items: baseline; gap: .3em; }
   #mine input { font-size: inherit; width: 8em; }
+  #mine .joinbtn { margin-left: .5em; border-bottom: 2px solid var(--hot); padding-bottom: 1px; }
   #mine .pencil { color: var(--faint); align-self: center; display: grid; }
   #mine .pencil:hover { color: var(--ink); }
   #mine .pencil svg { width: .8em; height: .8em; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
@@ -293,7 +296,7 @@
   <nav id="after" hidden></nav>
   <div id="tally" hidden></div>
   <section id="lobby" hidden>
-    <div class="who"><span id="mine"><form id="nameform"><input class="line" id="name" placeholder="your name" maxlength="24" autocomplete="off"></form><span class="me"></span><button type="button" class="pencil" title="change your name" aria-label="change your name"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4"/></svg></button></span><span class="others"></span></div>
+    <div class="who"><span id="mine"><form id="nameform"><input class="line" id="name" placeholder="your name" maxlength="24" autocomplete="off"></form><span class="me"></span><button type="button" class="pencil" title="change your name" aria-label="change your name"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4"/></svg></button><button type="button" class="joinbtn">join</button></span><span class="others"></span></div>
     <div><button id="go" disabled>ready</button><span class="wait"></span></div>
   </section>
   <div id="rivals" hidden><div class="strip"></div><div class="open"></div></div>
@@ -346,29 +349,67 @@ function remember(v) {
   if (!mine) return;
   const others = v.players.filter((p) => p.id !== me).map((p) => p.name);
   const entry = {
-    id: v.id, number: v.number, mode: v.mode, others, status: v.status,
+    id: v.id, room: v.room ?? v.id, number: v.number, mode: v.mode, others, status: v.status,
     found: mine.finish?.found ?? null,
     place: v.status === "over" && mine.finish?.found ? standings(v).indexOf(mine) + 1 : null,
     secret: v.secret, time: mine.finish?.time ?? null,
     at: Date.now(),
   };
-  const list = [entry, ...pastDuels().filter((d) => d.id !== v.id)].slice(0, 30);
+  const list = [entry, ...pastDuels().filter((d) => d.id !== v.id)].slice(0, 200);
   store.set("sd-duels", JSON.stringify(list));
 }
 
+// Your rooms (this browser's), most recent first: { room, others, rounds (started, newest first) }.
+function myRooms() {
+  const by = new Map();
+  for (const d of pastDuels()) {
+    const room = d.room ?? d.id;
+    if (!by.has(room)) by.set(room, { room, others: new Set(), rounds: [], at: 0 });
+    const r = by.get(room);
+    d.others.forEach((n) => r.others.add(n));
+    r.at = Math.max(r.at, d.at);
+    if (d.status !== "lobby") r.rounds.push(d);  // a round that never started isn't history
+  }
+  for (const r of by.values()) r.rounds.sort((a, b) => b.at - a.at);
+  return [...by.values()].sort((a, b) => b.at - a.at);
+}
+
+// One line per room you've played in: who, how many rounds, your wins, and how the latest went.
 function pastList() {
-  const list = pastDuels().filter((d) => d.others.length);
-  if (!list.length) return null;
-  return el("ol", { class: "past" }, ...list.map((d) => el("li", {},
-    el("a", { href: `/d/${d.id}?round` },  // that round itself, not the room's latest
-      el("span", { class: "num" }, d.number ? `#${d.number}` : d.mode === "set" ? "set" : "random"),
-      el("span", {}, `vs ${d.others.join(", ")}`),
-      el("span", { class: d.place === 1 ? "w" : "" },
-        d.found === true ? `${d.place ? ordinal(d.place) : "found"} · ${d.secret} · ${mmss(d.time)}`
-        : d.found === false ? `gave up · ${d.secret}`
-        : d.status === "lobby" ? "not started" : "in progress"),
+  const rooms = myRooms().filter((r) => r.rounds.length && r.others.size);
+  if (!rooms.length) return null;
+  return el("ol", { class: "past" }, ...rooms.map((r) => {
+    const d = r.rounds[0], wins = r.rounds.filter((x) => x.place === 1).length, n = r.rounds.length;
+    return el("li", {},
+      el("a", { href: `/d/${r.room}` },
+        el("span", {}, `vs ${[...r.others].join(", ")}`),
+        el("span", { class: "num" }, `${n} ${n === 1 ? "round" : "rounds"}${wins ? ` · ${wins} won` : ""}`),
+        el("span", { class: d.place === 1 ? "w" : "" },
+          d.found === true ? `${d.place ? ordinal(d.place) : "found"} · ${d.secret}`
+          : d.found === false ? `gave up · ${d.secret}` : "in progress"),
+      ),
+    );
+  }));
+}
+
+// Your rooms with something happening now: a lobby with someone there, or a round you're still racing.
+async function openNow() {
+  const rooms = myRooms().slice(0, 12);
+  const live = await Promise.all(rooms.map(async (r) => {
+    try {
+      const h = await (await fetch(`/d/${r.room}/head?player=${encodeURIComponent(me)}`)).json();
+      return (h.status === "lobby" && h.here > 0) || h.racing ? { ...r, h } : null;
+    } catch { return null; }
+  }));
+  const open = live.filter(Boolean);
+  if (!open.length) return null;
+  return el("div", { class: "open" }, el("h3", {}, "open now"), el("ol", { class: "past" }, ...open.map((r) => el("li", {},
+    el("a", { href: `/d/${r.room}` },
+      el("span", {}, r.others.size ? `vs ${[...r.others].join(", ")}` : "your room"),
+      el("span", {}, ""),
+      el("span", { class: "w" }, r.h.racing ? "you’re mid-race →" : `lobby · ${r.h.here} here →`),
     ),
-  )));
+  ))));
 }
 
 // Going into a rematch while in voice: the rematch's page joins voice by itself (set by the duel page).
@@ -383,9 +424,13 @@ async function rematch(id, puzzle, button, mode) {
   if (r.view?.next) { intoRematch(r.view.next); location.href = `/d/${r.view.room ?? r.view.next}`; } else button.disabled = false;
 }
 
+// Rooms this browser made: opening one joins you, as does opening a room you've played in (but no other).
+const made = () => { try { return JSON.parse(store.get("sd-made")) || []; } catch { return []; } };
+
 async function newDuel(puzzle, button, extra = {}) {
   button.disabled = true;
   const r = await post("/duels", { puzzle, ...extra });
+  if (r.id) store.set("sd-made", JSON.stringify([r.id, ...made()].slice(0, 50)));
   if (r.id) location.href = `/d/${r.id}`; else button.disabled = false;
   return r;
 }
@@ -751,6 +796,7 @@ else {
   $("#home h1").onclick = rollTitle;
   const past = pastList();
   if (past) $("#home").append(past);
+  openNow().then((o) => o && $("#home nav").after(o));
   for (const b of document.querySelectorAll("#home nav button")) {
     const kind = b.dataset.puzzle;
     if (kind === "set") b.onclick = () => { $("#setword").hidden = false; $("#setword input").focus(); };
@@ -839,22 +885,30 @@ function duelPage(id) {
   showMine();
   $("#mine .pencil").onclick = () => { editing = true; showMine(); $("#name").focus(); $("#name").select(); };
 
+  const inNow = () => !!view?.players.some((p) => p.id === me);
+  let blurred = false;  // a submit from leaving the box only keeps the name; Enter (or "join") also joins
   $("#nameform").onsubmit = (e) => {
     e.preventDefault();
     const name = $("#name").value.trim();
     if (!name) { const was = store.get("sd-name"); if (!was) return; $("#name").value = was; }
-    else { store.set("sd-name", name); join(name); }
+    else { store.set("sd-name", name); if (inNow() || !blurred) join(name).then((r) => r.view && apply(r.view)); }
     editing = false; showMine();
     if (view) render();
   };
-  $("#name").onblur = () => $("#nameform").requestSubmit();
+  $("#name").onblur = () => { blurred = true; $("#nameform").requestSubmit(); blurred = false; };
+  $("#mine .joinbtn").onclick = () => {
+    const name = $("#name").value.trim() || store.get("sd-name");
+    if (!name) { editing = true; showMine(); return $("#name").focus(); }
+    store.set("sd-name", name);
+    join(name).then((r) => r.view && apply(r.view));
+  };
   // Your name in the list follows the box as you type; everyone else sees it once you pause.
   let naming = null;
   $("#name").oninput = () => {
     const name = $("#name").value.trim();
     if (view?.status === "lobby") render();
     clearTimeout(naming);
-    if (name) naming = setTimeout(() => (store.set("sd-name", name), join(name)), 300);
+    if (name && inNow()) naming = setTimeout(() => (store.set("sd-name", name), join(name)), 300);
   };
   $("#go").onclick = () => {
     const mine = view?.players.find((p) => p.id === me);
@@ -933,7 +987,9 @@ function duelPage(id) {
     const v = view;
     if (!greeted) {
       greeted = true;
-      if (savedName && v.setter?.id !== me && (v.status === "lobby" || v.players.some((p) => p.id === me))) join(savedName);
+      // already in it, or a lobby of a room you made or have played in: in you go. Anywhere else, "join".
+      const known = made().includes(v.room) || myRooms().some((r) => r.room === v.room);
+      if (savedName && v.setter?.id !== me && (v.players.some((p) => p.id === me) || (v.status === "lobby" && known))) join(savedName);
     }
     remember(v);
     const setting = v.setter?.id === me;  // you set the word: you watch, seeing every word
@@ -956,6 +1012,7 @@ function duelPage(id) {
       const tick = (p) => (p.ready ? el("span", { class: "ok", title: "ready" }, "✓") : "");
       const mine = v.players.find((p) => p.id === me);
       $("#mine").hidden = setting || (!mine && v.players.length >= v.max);
+      $("#mine .joinbtn").hidden = !!mine;
       $("#mine .me").replaceChildren($("#name").value.trim() || mine?.name || "", ...(mine ? [tick(mine)] : []));
       // someone whose page has closed: greyed, "away"; the server drops them if they don't come back soon
       const away = (p) => v.here && !v.here.includes(p.id);
