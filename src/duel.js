@@ -103,13 +103,15 @@ export class Duel {
     return true;
   }
 
+  /** In the lobby, or late: until it's over anyone can join, on the same clock as everyone else. */
   join(playerId, name, now) {
     const clean = String(name ?? "").trim().slice(0, 24) || "player";
     const p = this.players.get(playerId);
     if (p) return void (p.name = clean);
-    if (this.status(now) !== "lobby") throw new DuelError("already started");
+    if (this.status(now) === "over") throw new DuelError("it's over");
     if (this.players.size >= MAX_PLAYERS) throw new DuelError("full");
     this.players.set(playerId, { id: playerId, name: clean, guesses: [], finish: null });
+    this.seen[playerId] = now;
   }
 
   start(now) {
