@@ -196,7 +196,8 @@ async function handle(req, res) {
     }
     // and what the home page's "open now" needs: is anyone there, are you in it
     const now = Date.now(), d = r.duel;
-    return json(res, 200, { id: d.id, status: d.status(now), here: present(r).length, in: d.players.has(player), racing: d.racing(player, now) });
+    const heard = Math.max(d.lastMove(), ...Object.values(d.seen));
+    return json(res, 200, { id: d.id, room: d.room, status: d.status(now), here: present(r).length, in: d.players.has(player), racing: d.racing(player, now), idle: now - heard });
   }
 
   // The room's record: its rounds from the first, through the rematch chain.

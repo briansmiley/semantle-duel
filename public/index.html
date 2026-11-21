@@ -374,9 +374,27 @@ function myRooms() {
   return [...by.values()].sort((a, b) => b.at - a.at);
 }
 
+// Where each of your rooms is now (its current round), so rooms that lead to the same round count as one
+// (rounds from before rooms existed are each their own "room", but their rematches lead on to the same one).
+async function roomsNow() {
+  const rooms = myRooms().slice(0, 40);
+  const heads = await Promise.all(rooms.map((r) =>
+    fetch(`/d/${r.room}/head?player=${encodeURIComponent(me)}`).then((x) => x.json()).catch(() => null)));
+  const merged = new Map();  // head's room (or the room itself) -> room
+  rooms.forEach((r, i) => {
+    const h = heads[i]?.id ? heads[i] : null, key = h?.room ?? h?.id ?? r.room;
+    const m = merged.get(key);
+    if (!m) return merged.set(key, { ...r, room: h?.room ?? r.room, others: new Set(r.others), h });
+    r.others.forEach((n) => m.others.add(n));
+    m.rounds = [...m.rounds, ...r.rounds].sort((a, b) => b.at - a.at);
+    m.at = Math.max(m.at, r.at);
+  });
+  return [...merged.values()].sort((a, b) => b.at - a.at);
+}
+
 // One line per room you've played in: who, how many rounds, your wins, and how the latest went.
-function pastList() {
-  const rooms = myRooms().filter((r) => r.rounds.length && r.others.size);
+function pastList(rooms) {
+  rooms = rooms.filter((r) => r.rounds.length && r.others.size);
   if (!rooms.length) return null;
   return el("ol", { class: "past" }, ...rooms.map((r) => {
     const d = r.rounds[0], wins = r.rounds.filter((x) => x.place === 1).length, n = r.rounds.length;
@@ -392,16 +410,18 @@ function pastList() {
   }));
 }
 
-// Your rooms with something happening now: a lobby with someone there, or a round you're still racing.
-async function openNow() {
-  const rooms = myRooms().slice(0, 12);
-  const live = await Promise.all(rooms.map(async (r) => {
-    try {
-      const h = await (await fetch(`/d/${r.room}/head?player=${encodeURIComponent(me)}`)).json();
-      return (h.status === "lobby" && h.here > 0) || h.racing ? { ...r, h } : null;
-    } catch { return null; }
-  }));
-  const open = live.filter(Boolean);
+// Your rooms with something on: a lobby with someone there, or a round you're racing that someone has open
+// or has moved in lately (a round left mid-race long ago isn't "open").
+const STALE_MS = 2 * 3600_000;
+function openList(rooms) {
+  const seen = new Set();
+  const open = rooms.filter((r) => {
+    const h = r.h;
+    if (!h || seen.has(h.id)) return false;
+    const on = (h.status === "lobby" && h.here > 0) || (h.racing && (h.here > 0 || h.idle < STALE_MS));
+    if (on) seen.add(h.id);
+    return on;
+  });
   if (!open.length) return null;
   return el("div", { class: "open" }, el("h3", {}, "open now"), el("ol", { class: "past" }, ...open.map((r) => el("li", {},
     el("a", { href: `/d/${r.room}` },
@@ -794,9 +814,15 @@ else {
   $("#home").hidden = false;
   rollTitle();
   $("#home h1").onclick = rollTitle;
-  const past = pastList();
-  if (past) $("#home").append(past);
-  openNow().then((o) => o && $("#home nav").after(o));
+  // what this browser remembers straight away; then, once we know where each room is now, merged and live
+  let shown = [pastList(myRooms())].filter(Boolean);
+  $("#home").append(...shown);
+  roomsNow().then((rooms) => {
+    shown.forEach((e) => e.remove());
+    shown = [openList(rooms), pastList(rooms)].filter(Boolean);
+    $("#home nav").after(...(shown[0]?.classList.contains("open") ? [shown[0]] : []));
+    $("#home").append(...shown.filter((e) => !e.classList.contains("open")));
+  }).catch(() => {});
   for (const b of document.querySelectorAll("#home nav button")) {
     const kind = b.dataset.puzzle;
     if (kind === "set") b.onclick = () => { $("#setword").hidden = false; $("#setword input").focus(); };
