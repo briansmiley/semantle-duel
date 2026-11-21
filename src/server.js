@@ -52,6 +52,11 @@ async function findRoom(id) {
 }
 const puzzles = new Map(); // number -> puzzle, so a busy day costs one fetch
 
+/** Semantle has neighbours for it (so it can be scored and hinted). */
+async function knows(word) {
+  try { return (await semantle.neighbours(word)).length > 0; } catch { return false; }
+}
+
 async function puzzle(number) {
   if (!puzzles.has(number)) puzzles.set(number, semantle.fetchPuzzle(number).catch((e) => (puzzles.delete(number), Promise.reject(e))));
   return puzzles.get(number);
@@ -110,12 +115,32 @@ function json(res, code, obj) {
   res.end(JSON.stringify(obj));
 }
 
-async function createDuel(which, room = null) {
+/**
+ * A new duel on Semantle's puzzle `which` (today's if not given), or with `mode: "new"` a fresh word from the
+ * vectors, or with `word` one that `setter` chose (they watch). A word must be one Semantle knows.
+ */
+async function createDuel(which, room = null, { mode, word, setter } = {}) {
   const today = semantle.todaysNumber();
-  const number = Number.isInteger(which) && which >= 1 && which <= today ? which : today;
+  let pick;
+  if (word !== undefined) {
+    const w = String(word).trim().toLowerCase();
+    if (!/^[a-z][a-z'-]*$/.test(w) || !(await knows(w))) throw new DuelError("Semantle doesn’t know that word");
+    pick = { number: null, secret: w, mode: "set" };
+  } else if (mode === "new") {
+    const v = await local;
+    for (let i = 0; v && i < 6 && !pick; i++) {
+      const w = v.randomWord();
+      if (await knows(w)) pick = { number: null, secret: w, mode: "new" };
+    }
+    // no vectors here, or no luck: a random past puzzle instead
+    pick ??= await puzzle(1 + Math.floor(Math.random() * (today - 1)));
+  } else {
+    pick = await puzzle(Number.isInteger(which) && which >= 1 && which <= today ? which : today);
+  }
   const id = newId();
-  const duel = new Duel(id, await puzzle(number), Date.now());
+  const duel = new Duel(id, pick, Date.now());
   if (room) duel.room = room;
+  if (pick.mode === "set") duel.setter = { id: String(setter?.id ?? ""), name: String(setter?.name ?? "").trim().slice(0, 24) || "someone" };
   rooms.set(id, { duel, listeners: new Set(), scores: new Map(), voice: new Map() });
   await save(duel);
   return id;
@@ -139,8 +164,8 @@ async function handle(req, res) {
   }
 
   if (req.method === "POST" && url.pathname === "/duels") {
-    const { puzzle: which } = await body(req);
-    return json(res, 200, { id: await createDuel(which) });
+    const { puzzle: which, mode, word, player, name } = await body(req);
+    return json(res, 200, { id: await createDuel(which, null, { mode, word, setter: { id: player, name } }) });
   }
 
   if (parts[0] !== "d" || parts.length !== 3) return json(res, 404, { error: "not found" });
@@ -192,7 +217,7 @@ async function handle(req, res) {
   const now = Date.now();
 
   if (action === "voice") {
-    if (!duel.players.has(player)) throw new DuelError("not in this duel");
+    if (!duel.players.has(player) && duel.setter?.id !== player) throw new DuelError("not in this duel");  // the setter may talk too
     if (msg.on) room.voice.set(player, { muted: !!msg.muted }); else room.voice.delete(player);
     broadcast(room);
     return json(res, 200, { ok: true });
@@ -226,7 +251,7 @@ async function handle(req, res) {
     if (!duel.players.has(player)) throw new DuelError("not in this duel");
     // first one to ask picks the puzzle; everyone else is pointed at the same duel
     if (!duel.next) {
-      room.rematch ??= createDuel(msg.puzzle, duel.room).then((id) => (duel.next = id)).finally(() => (room.rematch = null));
+      room.rematch ??= createDuel(msg.puzzle, duel.room, { mode: msg.mode }).then((id) => (duel.next = id)).finally(() => (room.rematch = null));
       await room.rematch;
     }
   } else if (action === "hint") {

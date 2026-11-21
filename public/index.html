@@ -47,7 +47,12 @@
   @keyframes swipe { from { clip-path: inset(-.5em 100% -.5em 0); transform: translateX(.6em); opacity: 0; } to { clip-path: inset(-.5em -1em -.5em 0); } }
   @media (prefers-reduced-motion: no-preference) { .roll > span:not([class]) { opacity: 0; } }
   @media (prefers-reduced-motion: reduce) { .roll > span, #home h1 .lead { animation: none !important; } }
-  #home nav { display: flex; gap: 2rem; justify-content: center; }
+  #home nav { display: flex; flex-wrap: wrap; gap: .8rem 2rem; justify-content: center; }
+  #setword { display: flex; flex-wrap: wrap; gap: .6rem 1rem; align-items: baseline; justify-content: center; }
+  #setword input { width: 11em; font-size: 1.15rem; text-align: center; }
+  #setword button { white-space: nowrap; font-size: 1.15rem; border-bottom: 2px solid var(--hot); padding-bottom: 1px; }
+  #setword .why { flex-basis: 100%; text-align: center; color: var(--hot); font-style: italic; font-size: .95rem; }
+  #setword .why:empty { display: none; }
   #home nav button { font-size: 1.15rem; border-bottom: 1.5px solid currentColor; padding-bottom: 2px; }
   #home nav button, #home nav a { font-size: 1.15rem; border-bottom: 1.5px solid currentColor; padding-bottom: 2px; color: inherit; text-decoration: none; }
   #home nav .quiet { color: var(--faint); }
@@ -74,6 +79,8 @@
   header { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
   header .no { color: var(--faint); text-decoration: none; border-bottom: 1px dotted var(--faint); }
   header .no:hover { color: var(--ink); }
+  header .no:not([href]) { border: 0; }  /* a new or set word: nothing on semantle.com to link to */
+  header .no:not([href]):hover { color: var(--faint); }
   #clock.stopped { color: var(--faint); }
   #pausebar { color: var(--faint); font-size: .95rem; margin-left: .5em; }
   #pausebar button { color: var(--ink); border-bottom: 1px solid currentColor; margin-left: .3em; }
@@ -257,9 +264,12 @@
   <h1><span class="lead">semantle</span> <span class="roll"><span><i>duel</i></span></span></h1>
   <nav>
     <button data-puzzle="today">today’s word</button>
-    <button data-puzzle="random" class="quiet">random</button>
+    <button data-puzzle="random" class="quiet" title="a past Semantle puzzle">random</button>
+    <button data-puzzle="new" class="quiet" title="a word that isn’t a Semantle puzzle">new word</button>
+    <button data-puzzle="set" class="quiet" title="you pick the word and watch">set a word</button>
     <a href="/archive" class="quiet">archive</a>
   </nav>
+  <form id="setword" hidden><input class="line" placeholder="the secret word" maxlength="30" autocomplete="off" autocapitalize="off" spellcheck="false"><button>make the duel</button><span class="why"></span></form>
 </main>
 
 <main id="archive" hidden>
@@ -335,7 +345,7 @@ function remember(v) {
   if (!mine) return;
   const others = v.players.filter((p) => p.id !== me).map((p) => p.name);
   const entry = {
-    id: v.id, number: v.number, others, status: v.status,
+    id: v.id, number: v.number, mode: v.mode, others, status: v.status,
     found: mine.finish?.found ?? null,
     place: v.status === "over" && mine.finish?.found ? standings(v).indexOf(mine) + 1 : null,
     secret: v.secret, time: mine.finish?.time ?? null,
@@ -350,7 +360,7 @@ function pastList() {
   if (!list.length) return null;
   return el("ol", { class: "past" }, ...list.map((d) => el("li", {},
     el("a", { href: `/d/${d.id}?round` },  // that round itself, not the room's latest
-      el("span", { class: "num" }, `#${d.number}`),
+      el("span", { class: "num" }, d.number ? `#${d.number}` : d.mode === "set" ? "set" : "new"),
       el("span", {}, `vs ${d.others.join(", ")}`),
       el("span", { class: d.place === 1 ? "w" : "" },
         d.found === true ? `${d.place ? ordinal(d.place) : "found"} · ${d.secret} · ${mmss(d.time)}`
@@ -365,17 +375,18 @@ let intoRematch = () => {};
 const VOICE_INTO = "sd-voice-into";  // sessionStorage: "<duel id>|<when>": this tab was in voice, heading into (or reloading) that duel
 
 // Rematch a finished duel on this puzzle; whoever asks first sets it up, and everyone lands in the same one.
-async function rematch(id, puzzle, button) {
+async function rematch(id, puzzle, button, mode) {
   button.disabled = true;
-  const r = await post(`/d/${id}/rematch`, { player: me, puzzle });
+  const r = await post(`/d/${id}/rematch`, { player: me, puzzle, mode });
   // the room's link: it opens the rematch
   if (r.view?.next) { intoRematch(r.view.next); location.href = `/d/${r.view.room ?? r.view.next}`; } else button.disabled = false;
 }
 
-async function newDuel(puzzle, button) {
+async function newDuel(puzzle, button, extra = {}) {
   button.disabled = true;
-  const r = await post("/duels", { puzzle });
+  const r = await post("/duels", { puzzle, ...extra });
   if (r.id) location.href = `/d/${r.id}`; else button.disabled = false;
+  return r;
 }
 
 /* ---------- title ---------- */
@@ -739,9 +750,21 @@ else {
   $("#home h1").onclick = rollTitle;
   const past = pastList();
   if (past) $("#home").append(past);
-  for (const b of document.querySelectorAll("#home button")) {
-    b.onclick = async () => newDuel(b.dataset.puzzle === "random" ? await randomUnplayed() : undefined, b);
+  for (const b of document.querySelectorAll("#home nav button")) {
+    const kind = b.dataset.puzzle;
+    if (kind === "set") b.onclick = () => { $("#setword").hidden = false; $("#setword input").focus(); };
+    else if (kind === "new") b.onclick = () => newDuel(undefined, b, { mode: "new" });
+    else b.onclick = async () => newDuel(kind === "random" ? await randomUnplayed() : undefined, b);
   }
+  // set a word: you make the duel and watch it, seeing every word
+  $("#setword").onsubmit = async (e) => {
+    e.preventDefault();
+    const word = $("#setword input").value.trim();
+    if (!word) return;
+    $("#setword .why").textContent = "";
+    const r = await newDuel(undefined, $("#setword button"), { word, player: me, name: store.get("sd-name") ?? "" });
+    if (!r.id) $("#setword .why").textContent = r.error ?? "try again";
+  };
 }
 
 // A past puzzle (not today's) that this browser hasn't duelled yet.
@@ -913,23 +936,27 @@ function duelPage(id) {
     const v = view;
     if (!greeted) {
       greeted = true;
-      if (savedName && (v.status === "lobby" || v.players.some((p) => p.id === me))) join(savedName);
+      if (savedName && v.setter?.id !== me && (v.status === "lobby" || v.players.some((p) => p.id === me))) join(savedName);
     }
     remember(v);
-    $(".no").textContent = `#${v.number}${v.number === today ? " (today)" : ""}`;
+    const setting = v.setter?.id === me;  // you set the word: you watch, seeing every word
+    // which word: Semantle's puzzle (linked), a new one, or one somebody set
+    $(".no").textContent = v.number ? `#${v.number}${v.number === today ? " (today)" : ""}`
+      : v.mode === "set" ? (setting ? `you set “${v.secret}”` : `set by ${v.setter?.name ?? "someone"}`) : "a new word";
+    if (!v.number) $(".no").removeAttribute("href");
     // semantle.com's archive only has past puzzles; today's is its front page
-    $(".no").href = v.number === today ? "https://semantle.com/" : `https://semantle.com/archive/game?num=${v.number}`;
+    if (v.number) $(".no").href = v.number === today ? "https://semantle.com/" : `https://semantle.com/archive/game?num=${v.number}`;
     const inIt = v.players.some((p) => p.id === me);
     const lobby = v.status === "lobby";
 
     $("#lobby").hidden = !lobby;
-    $("#watch").hidden = inIt || lobby || v.status === "over" || v.players.length >= v.max;
+    $("#watch").hidden = inIt || setting || lobby || v.status === "over" || v.players.length >= v.max;
     $("#share").hidden = !lobby;
     if (lobby) {
       // you first (your entry is kept, not redrawn, so typing in it isn't interrupted), then everyone else
       const tick = (p) => (p.ready ? el("span", { class: "ok", title: "ready" }, "✓") : "");
       const mine = v.players.find((p) => p.id === me);
-      $("#mine").hidden = !mine && v.players.length >= v.max;
+      $("#mine").hidden = setting || (!mine && v.players.length >= v.max);
       $("#mine .me").replaceChildren($("#name").value.trim() || mine?.name || "", ...(mine ? [tick(mine)] : []));
       const others = v.players.filter((p) => p.id !== me).map((p) => el("span", {}, el("span", {}, p.name), tick(p)));
       if (v.players.length + (mine ? 0 : 1) < v.max) others.push(el("span", { class: "empty" }, "…"));
@@ -937,6 +964,7 @@ function duelPage(id) {
       // everyone says ready, then the countdown starts by itself
       const go = $("#go");
       go.disabled = !mine;
+      go.hidden = setting;
       go.classList.toggle("on", !!mine?.ready);
       go.textContent = mine?.ready ? "not ready" : "ready";
       const unready = v.players.filter((p) => !p.ready && p.id !== me).map((p) => p.name);
@@ -1016,11 +1044,11 @@ function duelPage(id) {
   // voice chat, for the duel's players: join, then who's in (lit while talking), mute and leave
   function voiceBar(v) {
     const bar = $("#voice"), st = voice.state;
-    const inIt = v.players.some((p) => p.id === me);
+    const inIt = v.players.some((p) => p.id === me) || v.setter?.id === me;  // the setter may talk too
     bar.hidden = !inIt || !window.RTCPeerConnection || !navigator.mediaDevices;
     if (bar.hidden) return;
     const members = v.voice ?? [];
-    const nameOf = (id) => (id === me ? "you" : v.players.find((p) => p.id === id)?.name ?? "?");
+    const nameOf = (id) => (id === me ? "you" : v.players.find((p) => p.id === id)?.name ?? (v.setter?.id === id ? v.setter.name : "?"));
     const btn = (label, fn) => { const b = el("button", { type: "button" }, label); b.onclick = fn; return b; };
     const kids = [];
     if (st.status === "off") {
@@ -1094,6 +1122,7 @@ function duelPage(id) {
       kids.push(el("span", { class: "pick" },
         el("span", {}, "rematch on"),
         go("a random one", randomUnplayed),
+        (() => { const b = el("button", { type: "button" }, "a new word"); b.onclick = () => rematch(v.id, undefined, b, "new"); return b; })(),
         today && today !== v.number ? go("today’s", async () => today) : "",
         el("a", { href: `/archive?rematch=${v.id}` }, "the archive"),
       ));
