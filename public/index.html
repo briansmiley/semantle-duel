@@ -324,7 +324,7 @@ function pastList() {
   const list = pastDuels().filter((d) => d.others.length);
   if (!list.length) return null;
   return el("ol", { class: "past" }, ...list.map((d) => el("li", {},
-    el("a", { href: `/d/${d.id}` },
+    el("a", { href: `/d/${d.id}?round` },  // that round itself, not the room's latest
       el("span", { class: "num" }, `#${d.number}`),
       el("span", {}, `vs ${d.others.join(", ")}`),
       el("span", { class: d.place === 1 ? "w" : "" },
@@ -339,7 +339,7 @@ function pastList() {
 async function rematch(id, puzzle, button) {
   button.disabled = true;
   const r = await post(`/d/${id}/rematch`, { player: me, puzzle });
-  if (r.view?.next) location.href = `/d/${r.view.next}`; else button.disabled = false;
+  if (r.view?.next) location.href = `/d/${r.view.room ?? r.view.next}`; else button.disabled = false;  // the room's link: it opens the rematch
 }
 
 async function newDuel(puzzle, button) {
@@ -697,7 +697,7 @@ function voiceChat(base, changed) {
 }
 
 /* ---------- pages ---------- */
-if (path[0] === "d") { $("#top .logo").hidden = false; duelPage(path[1]); }  // home and archive have their own way home
+if (path[0] === "d") { $("#top .logo").hidden = false; openDuel(path[1]); }  // home and archive have their own way home
 else if (path[0] === "archive") archivePage();
 else {
   $("#home").hidden = false;
@@ -742,6 +742,15 @@ async function archivePage() {
 }
 
 /* ---------- duel ---------- */
+// /d/<room> opens the room's latest round (unless you're still racing an earlier one); ?round opens just that one.
+async function openDuel(code) {
+  let id = code;
+  if (!new URLSearchParams(location.search).has("round")) {
+    try { id = (await (await fetch(`/d/${code}/head?player=${encodeURIComponent(me)}`)).json()).id ?? code; } catch {}
+  }
+  duelPage(id);
+}
+
 function duelPage(id) {
   $("#duel").hidden = false;
   const base = `/d/${id}`;
@@ -787,8 +796,9 @@ function duelPage(id) {
     if (mine) post(`${base}/ready`, { player: me, ready: !mine.ready }).then((r) => r.view && apply(r.view));
   };
   $("#share").onclick = async () => {
-    try { await navigator.clipboard.writeText(location.href); $("#share").textContent = "copied"; }
-    catch { $("#share").textContent = location.href; }
+    const link = `${location.origin}/d/${view?.room ?? id}`;  // the room's link, whichever round this is
+    try { await navigator.clipboard.writeText(link); $("#share").textContent = "copied"; }
+    catch { $("#share").textContent = link; }
     setTimeout(() => ($("#share").textContent = "copy link"), 1600);
   };
 
@@ -969,7 +979,7 @@ function duelPage(id) {
     nav.hidden = !(mine ? mine.finish : v.status === "over");
     if (nav.hidden) return;
     const kids = [];
-    if (v.next) kids.push(el("a", { href: `/d/${v.next}`, class: "lead" }, "join the rematch →"));
+    if (v.next) kids.push(el("a", { href: `/d/${v.room}`, class: "lead" }, "join the rematch →"));
     else if (mine && v.players.length > 1 && !picking) {
       const b = el("button", { class: "lead", type: "button" }, "rematch");
       b.onclick = () => { picking = true; render(); };
