@@ -16,7 +16,7 @@ export const AWAY_MS = Number(process.env.AWAY_MS ?? 90_000);
 /** @typedef {{id:string, name:string, guesses:Guess[], finish:Finish|null, ready?:boolean, checks?:Check[]}} Player  ready: in the lobby, said they are set to go */
 
 export class Duel {
-  /** @param {string} id @param {{number:number|null, secret:string, mode?:"new"|"set"}} puzzle  number: Semantle's; null for a new word or one someone set */
+  /** @param {string} id @param {{number:number|null, secret:string, mode?:"random"|"set"}} puzzle  number: Semantle's, if it's one of theirs; null for our own words and set ones */
   constructor(id, puzzle, now) {
     this.id = id;
     this.puzzle = puzzle;

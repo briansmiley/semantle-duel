@@ -3,6 +3,10 @@
 Plain Node (no build): `src/server.js` serves `public/index.html` and the duel API; duels are JSON files in
 `DATA_DIR` (a Fly volume in production). `npm run dev` runs it locally with `.env`.
 
+"random word" duels draw from `src/words.json`: Semantle's archive answers plus our own words filtered by
+Claude Haiku. Rebuild it with `node --env-file=.env scripts/build-words.js` (needs `data/vectors` and
+`ANTHROPIC_API_KEY`; caches in `data/words-cache`).
+
 ## Workflow
 
 - Work comes from Linear, team **SMI**, project **Semantle Duel** (in-app feedback lands there as `[FEEDBACK] …`).
