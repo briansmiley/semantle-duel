@@ -474,7 +474,8 @@ let currentView = null;  // the duel on screen, if any
   };
   for (const b of $("#report h2").children) b.onclick = () => pick(b.dataset.kind);
   $("#bug").onclick = () => { pick("bug"); said.textContent = ""; send.disabled = false; d.showModal(); ta.focus(); };
-  $("#report .cancel").onclick = () => d.close();
+  // cancel throws the draft away; a tap outside only puts it aside
+  $("#report .cancel").onclick = () => { ta.value = ""; setImage(null); d.close(); };
 
   // A screenshot, picked, dropped or pasted: shrunk to a JPEG no bigger than 1600px on its longer side.
   let image = null;
