@@ -333,11 +333,15 @@ function pastList() {
   )));
 }
 
+// Going into a rematch while in voice: the rematch's page joins voice by itself (set by the duel page).
+let intoRematch = () => {};
+const VOICE_INTO = "sd-voice-into";  // sessionStorage: this tab was in voice, heading into that duel
+
 // Rematch a finished duel on this puzzle; whoever asks first sets it up, and everyone lands in the same one.
 async function rematch(id, puzzle, button) {
   button.disabled = true;
   const r = await post(`/d/${id}/rematch`, { player: me, puzzle });
-  if (r.view?.next) location.href = `/d/${r.view.next}`; else button.disabled = false;
+  if (r.view?.next) { intoRematch(r.view.next); location.href = `/d/${r.view.next}`; } else button.disabled = false;
 }
 
 async function newDuel(puzzle, button) {
@@ -803,6 +807,9 @@ function duelPage(id) {
     es.addEventListener("signal", (e) => { heard = Date.now(); const m = JSON.parse(e.data); voice.onSignal(m.from, m.data); });
   };
   const voice = voiceChat(base, () => view && voiceBar(view));
+  intoRematch = (next) => { try { if (voice.state.status === "on") sessionStorage.setItem(VOICE_INTO, next); } catch {} };
+  let rejoinVoice = false;  // came here from a rematch while in voice: join once we're a player here
+  try { rejoinVoice = sessionStorage.getItem(VOICE_INTO) === id; sessionStorage.removeItem(VOICE_INTO); } catch {}
   connect();
   setInterval(() => Date.now() - heard > 40_000 && connect(), 5_000);
   document.addEventListener("visibilitychange", () => !document.hidden && Date.now() - heard > 20_000 && connect());
@@ -819,6 +826,7 @@ function duelPage(id) {
     view = currentView = v;
     skew = view.now - Date.now();
     voice.sync(v.voice);
+    if (rejoinVoice && v.players.some((p) => p.id === me)) { rejoinVoice = false; voice.join(); }
     render();
   }
 
@@ -968,7 +976,11 @@ function duelPage(id) {
     nav.hidden = !(mine ? mine.finish : v.status === "over");
     if (nav.hidden) return;
     const kids = [];
-    if (v.next) kids.push(el("a", { href: `/d/${v.next}`, class: "lead" }, "join the rematch →"));
+    if (v.next) {
+      const a = el("a", { href: `/d/${v.next}`, class: "lead" }, "join the rematch →");
+      a.onclick = () => intoRematch(v.next);
+      kids.push(a);
+    }
     else if (mine && v.players.length > 1 && !picking) {
       const b = el("button", { class: "lead", type: "button" }, "rematch");
       b.onclick = () => { picking = true; render(); };
