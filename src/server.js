@@ -194,7 +194,9 @@ async function handle(req, res) {
       if (!next) break;
       r = next;
     }
-    return json(res, 200, { id: r.duel.id });
+    // and what the home page's "open now" needs: is anyone there, are you in it
+    const now = Date.now(), d = r.duel;
+    return json(res, 200, { id: d.id, status: d.status(now), here: present(r).length, in: d.players.has(player), racing: d.racing(player, now) });
   }
 
   // The room's record: its rounds from the first, through the rematch chain.
