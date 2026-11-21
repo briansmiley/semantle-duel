@@ -140,7 +140,6 @@
     #rivals .strip::-webkit-scrollbar { display: none; }
     .chip { flex: none; display: inline-flex; align-items: baseline; gap: .35em; padding-bottom: 2px; border-bottom: 2px solid transparent; }
     .chip.on { border-color: var(--ink); }
-    .chip.fresh { animation: fresh 1.2s ease-out; }
     .chip .name { font-size: 1.05rem; }
     .chip.first .name { color: var(--hot); }
     .chip .s { font-size: .9rem; }
@@ -183,7 +182,8 @@
   li.shared .n { color: var(--ink); font-weight: 600; }  /* someone else guessed it too */
   li .w small { color: var(--hot); font-size: .72em; font-style: italic; margin-left: .35em; }
   li.check .w { font-style: italic; }
-  li.pending { color: var(--faint); }  /* takes the latest row's place as is, line and all, until the score comes */
+  /* a guess being scored: your word as you typed it, in full ink; only the score waits */
+  li.pending .s { color: var(--faint); }
   li .w { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   li .w.hidden { filter: blur(5px); user-select: none; color: var(--faint); }
   li .s { text-align: right; }
@@ -194,8 +194,15 @@
   li .p.temp { color: var(--faint); }
   li.secret .w { color: var(--hot); }
   li.missed .w, li.missed .s { color: var(--faint); }
-  li.fresh { animation: fresh 1.2s ease-out; }
-  @keyframes fresh { from { background: color-mix(in srgb, var(--hot) 14%, transparent); } }
+  /* someone else's new guess: a highlight that swells in, then fades */
+  li.fresh, .chip.fresh { animation: fresh 1.4s ease-in-out; }
+  @keyframes fresh { 0%, 100% { background: transparent; } 18% { background: color-mix(in srgb, var(--hot) 12%, transparent); } }
+  /* your own guess landing: only the new information arrives, the score fading in and the bar growing */
+  li.landed .s, li.landed .p { animation: land .18s ease-out both; }
+  li.landed .p .bar i { animation: grow .45s cubic-bezier(.2,.7,.3,1) both; transform-origin: left; }
+  @keyframes land { from { opacity: 0; } }
+  @keyframes grow { from { transform: scaleX(0); } }
+  @media (prefers-reduced-motion: reduce) { li.fresh, .chip.fresh, li.landed .s, li.landed .p, li.landed .p .bar i { animation: none; } }
 
   /* feedback */
   #top { display: flex; align-items: baseline; padding: .7rem 16px 0; max-width: 980px; margin: 0 auto; }
@@ -859,8 +866,15 @@ function duelPage(id) {
     skew = view.now - Date.now();
     voice.sync(v.voice);
     if (rejoinVoice && v.players.some((p) => p.id === me)) { rejoinVoice = false; voice.join(); }
+    // The same news often comes twice (the reply to a guess, then the event stream): redraw once, so a
+    // second redraw a few ms later doesn't cut the first one's animations short.
+    const { now: _n, elapsed: _e, ...rest } = v;
+    const sig = JSON.stringify(rest);
+    if (sig === drawn) return;
+    drawn = sig;
     render();
   }
+  let drawn = null;  // what was last drawn, less the clock
 
   setInterval(tick, 250);
 
@@ -936,8 +950,10 @@ function duelPage(id) {
     const focused = document.activeElement?.id === "guess";
     // a crowd: the first (you) on the left, everyone else stacked beside
     const drawn = sides.map((p) => side(p, v));
+    const before = rowsAt();
     board.replaceChildren(...(sides.length > 2 ? [drawn[0], el("div", { class: "others" }, ...drawn.slice(1))] : drawn));
     strip(v, sides.filter((p) => p.id !== me), inIt);
+    glide(before);
     seen = new Set(v.players.flatMap((p) => [...p.guesses.map((g) => `${p.id}:${g.n}`), ...(p.checks ?? []).map((c, k) => `${p.id}:c${k}`)]));
     flashRecall = false;
     if (focused || (v.status === "playing" && inIt && !matchMedia("(hover: none)").matches)) $("#guess")?.focus({ preventScroll: true });  // a redraw keeps the box focused but never scrolls you back up to it
@@ -1084,12 +1100,12 @@ function duelPage(id) {
         pending.push(word); render();
         const r = await post(`${base}/guess`, { player: me, word });
         pending = pending.filter((w) => w !== word);
-        if (r.view) apply(r.view);
+        if (r.view) apply(r.view);  // draws it (once), unless the event stream already did
         if (!r.ok) {
           if (r.error === "already guessed") { recall = word; flashRecall = true; }
           else note = { word, msg: r.error === "upstream trouble" ? "server hiccup, try again" : r.error ?? "try again" };
-        }
-        render();
+          render();
+        } else if (!r.view) render();
       };
       div.append(form);
     } else if (!mine && v.players.length === 2 && v.players.some((q) => q.id === me) && (v.status === "playing" || v.status === "over")) {
@@ -1114,16 +1130,39 @@ function duelPage(id) {
     sorted = sorted.slice(0, cap);
     // One row up top, for whatever happened last: a word that didn't count, one being scored, one already
     // guessed, or the latest guess. (A note is newer than anything pending: sending a word clears it.)
-    if (told) ol.append(el("li", { class: "note latest" }, el("span", { class: "n" }, ""), el("span", { class: "w" }, note.word), el("span", { class: "msg" }, note.msg)));
-    else if (waiting.length) ol.append(el("li", { class: "pending latest" }, el("span", { class: "n num" }, ""), el("span", { class: "w" }, waiting.at(-1)), el("span", { class: "s num" }, "…"), el("span", {})));
+    if (told) ol.append(el("li", { class: "note latest", "data-key": `${p.id}:latest` }, el("span", { class: "n" }, ""), el("span", { class: "w" }, note.word), el("span", { class: "msg" }, note.msg)));
+    else if (waiting.length) ol.append(el("li", { class: "pending latest", "data-key": `${p.id}:latest` }, el("span", { class: "n num" }, ""), el("span", { class: "w" }, waiting.at(-1)), el("span", { class: "s num" }, "…"), el("span", {})));
     else if (again) ol.append(row(again, p, v, true, flashRecall));
     else if (last && all.length > 1) ol.append(row(last, p, v, true));
     // gave up: the word they didn't get, where it would have sat
-    if (f && !f.found && v.secret) ol.append(el("li", { class: "missed" }, el("span", { class: "n" }, ""), el("span", { class: "w" }, v.secret), el("span", { class: "s num" }, "100.00"), el("span", { class: "p" }, "😞")));
+    if (f && !f.found && v.secret) ol.append(el("li", { class: "missed", "data-key": `${p.id}:missed` }, el("span", { class: "n" }, ""), el("span", { class: "w" }, v.secret), el("span", { class: "s num" }, "100.00"), el("span", { class: "p" }, "😞")));
     for (const g of sorted) ol.append(row(g, p, v, false));
-    if (more > 0) ol.append(el("li", { class: "more" }, `+${more}`));
+    if (more > 0) ol.append(el("li", { class: "more", "data-key": `${p.id}:more` }, `+${more}`));
     div.append(ol);
     return div;
+  }
+
+  // Rows move rather than jump: before a redraw, where each row was (by key); after it, each one starts
+  // there and slides to its new place, and rows that are new fade in. Only what's on screen.
+  function rowsAt() {
+    const at = new Map();
+    for (const li of document.querySelectorAll("#duel li[data-key]")) {
+      if (li.offsetParent) at.set((li.closest("#rivals") ? "r:" : "b:") + li.dataset.key, li.getBoundingClientRect().top);
+    }
+    return at;
+  }
+  function glide(before) {
+    if (!before.size || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const h = innerHeight;
+    for (const li of document.querySelectorAll("#duel li[data-key]")) {
+      if (!li.offsetParent) continue;
+      const now = li.getBoundingClientRect().top, was = before.get((li.closest("#rivals") ? "r:" : "b:") + li.dataset.key);
+      if (was === undefined) {
+        if (now > -60 && now < h) li.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: "ease-out" });
+      } else if (Math.abs(was - now) >= 1 && Math.min(was, now) < h && Math.max(was, now) > -60) {
+        li.animate([{ transform: `translateY(${was - now}px)` }, { transform: "none" }], { duration: 170, easing: "cubic-bezier(.2,.7,.3,1)" });
+      }
+    }
   }
 
   // phone: everyone else in one strip (finished by place, then by best score); tap a name for their list
@@ -1156,7 +1195,7 @@ function duelPage(id) {
     if (!p) return box2.replaceChildren();
     const f = p.finish, last = p.guesses.at(-1), ol = el("ol", {});
     if (last && p.guesses.length > 1) ol.append(row(last, p, v, true));
-    if (f && !f.found && v.secret) ol.append(el("li", { class: "missed" }, el("span", { class: "n" }, ""), el("span", { class: "w" }, v.secret), el("span", { class: "s num" }, "100.00"), el("span", { class: "p" }, "😞")));
+    if (f && !f.found && v.secret) ol.append(el("li", { class: "missed", "data-key": `${p.id}:missed` }, el("span", { class: "n" }, ""), el("span", { class: "w" }, v.secret), el("span", { class: "s num" }, "100.00"), el("span", { class: "p" }, "😞")));
     for (const g of [...p.guesses].sort((a, b) => b.score - a.score)) ol.append(row(g, p, v, false));
     if (!p.guesses.length) ol.append(el("li", { class: "more" }, "no guesses yet"));
     box2.replaceChildren(ol);
@@ -1165,7 +1204,9 @@ function duelPage(id) {
   function row(g, p, v, isLatest, isAgain = false) {
     const key = g.check ? `c${g.k}` : g.n;
     const fresh = (isLatest || p.guesses.length === 1) && seen !== null && !seen.has(`${p.id}:${key}`);
-    const li = el("li", { class: [isLatest && "latest", fresh && "fresh", isAgain && "again", g.shared && "shared", g.check && "check", v.secret && g.word === v.secret && "secret"].filter(Boolean).join(" ") });
+    // yours lands quietly (the score fades in); someone else's gets a highlight
+    const lands = fresh && p.id === me;
+    const li = el("li", { "data-key": `${p.id}:${isLatest ? "latest" : key}`, class: [isLatest && "latest", lands && "landed", fresh && !lands && "fresh", isAgain && "again", g.shared && "shared", g.check && "check", v.secret && g.word === v.secret && "secret"].filter(Boolean).join(" ") });
     const word = g.word ?? "x".repeat(4 + ((g.n * 7 + p.id.charCodeAt(0)) % 6));
     li.append(
       el("span", { class: "n num", title: g.shared ? "guessed by someone else too" : "" }, g.check ? "·" : g.n),
