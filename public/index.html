@@ -529,12 +529,20 @@ async function rollTitle() {
   const roll = $("#home .roll");
   if (rolling || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   rolling = true;
-  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  // Background tabs don't run CSS animations, so the roll holds still while the tab is hidden
+  // and picks up where it left off when it's back.
+  const visible = () => document.hidden && new Promise((r) => document.addEventListener("visibilitychange", function on() {
+    if (!document.hidden) { document.removeEventListener("visibilitychange", on); r(); }
+  }));
+  const wait = async (ms) => { await visible(); await new Promise((r) => setTimeout(r, ms)); await visible(); };
   const card = (w, score) => el("span", {}, el("i", {}, w), score == null ? "" : el("small", {}, score.toFixed(2)));
   await document.fonts?.ready;
   if (!roll.style.width) roll.style.width = roll.firstElementChild.offsetWidth + "px";
   const show = (span, cls) => {
-    const old = roll.firstElementChild;
+    // Only the word on show may leave; anything still on its way out goes now, so words never pile up
+    // (an "out" word waits on animationend, which never comes if the animation didn't run).
+    const old = roll.lastElementChild;
+    for (const s of [...roll.children]) if (s !== old) s.remove();
     roll.append(span);
     span.className = cls;
     if (old && cls.startsWith("in")) { old.className = "out"; old.onanimationend = () => old.remove(); }
