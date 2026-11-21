@@ -79,6 +79,7 @@
   #pausebar button { color: var(--ink); border-bottom: 1px solid currentColor; margin-left: .3em; }
   #pausebar .ask { color: var(--hot); }
   #board.paused .side.me ol, #board.paused #guess { filter: blur(6px); pointer-events: none; }
+  .side form.slot { visibility: hidden; }
   .side form .submit { font-size: 1.05rem; border-bottom: 2px solid var(--hot); padding-bottom: 1px; }
   .side form .submit:disabled { color: var(--faint); border-color: var(--rule); cursor: default; }
   #clock { font: 400 clamp(2.6rem, 10vw, 4rem)/1 var(--serif); letter-spacing: -.02em; }
@@ -91,6 +92,10 @@
   #voice .who .talking { color: var(--hot); }
   #voice .who .muted, #voice .who .off { color: var(--faint); }
   #voice .err { color: var(--hot); font-style: italic; }
+  #watch { margin-top: 1rem; display: flex; flex-wrap: wrap; align-items: baseline; gap: .4rem 1rem; font-size: 1.1rem; }
+  #watch span { color: var(--faint); font-style: italic; }
+  #watch input { width: 9em; }
+  #watch .go { border-bottom: 2px solid var(--hot); padding-bottom: 1px; }
   #share { color: var(--faint); font-size: 1rem; border-bottom: 1px dotted var(--faint); }
   #banner { font: 400 1.5rem/1.2 var(--serif); margin: 1.4rem 0 .4rem; }
   #banner b { color: var(--hot); font-weight: 400; }
@@ -173,10 +178,7 @@
   li.shared .n { color: var(--ink); font-weight: 600; }  /* someone else guessed it too */
   li .w small { color: var(--hot); font-size: .72em; font-style: italic; margin-left: .35em; }
   li.check .w { font-style: italic; }
-  li.pending { color: var(--faint); }
-  /* only shows if scoring is slow, so a quick guess doesn't flash a grey row first */
-  @media (prefers-reduced-motion: no-preference) { li.pending { animation: late .2s .35s both; } }
-  @keyframes late { from { opacity: 0; } }
+  li.pending { color: var(--faint); }  /* takes the latest row's place as is, line and all, until the score comes */
   li .w { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   li .w.hidden { filter: blur(5px); user-select: none; color: var(--faint); }
   li .s { text-align: right; }
@@ -255,6 +257,7 @@
     <button id="share" title="copy link">copy link</button>
   </header>
   <div id="voice" hidden></div>
+  <form id="watch" hidden><span>you’re watching.</span><input class="line" id="latename" placeholder="your name" maxlength="24" autocomplete="off"><button class="go">join in</button></form>
   <div id="banner" hidden></div>
   <nav id="after" hidden></nav>
   <section id="lobby" hidden>
@@ -335,11 +338,16 @@ function pastList() {
   )));
 }
 
+// Going into a rematch while in voice: the rematch's page joins voice by itself (set by the duel page).
+let intoRematch = () => {};
+const VOICE_INTO = "sd-voice-into";  // sessionStorage: this tab was in voice, heading into that duel
+
 // Rematch a finished duel on this puzzle; whoever asks first sets it up, and everyone lands in the same one.
 async function rematch(id, puzzle, button) {
   button.disabled = true;
   const r = await post(`/d/${id}/rematch`, { player: me, puzzle });
-  if (r.view?.next) location.href = `/d/${r.view.room ?? r.view.next}`; else button.disabled = false;  // the room's link: it opens the rematch
+  // the room's link: it opens the rematch
+  if (r.view?.next) { intoRematch(r.view.next); location.href = `/d/${r.view.room ?? r.view.next}`; } else button.disabled = false;
 }
 
 async function newDuel(puzzle, button) {
@@ -477,7 +485,8 @@ let currentView = null;  // the duel on screen, if any
   };
   for (const b of $("#report h2").children) b.onclick = () => pick(b.dataset.kind);
   $("#bug").onclick = () => { pick("bug"); said.textContent = ""; send.disabled = false; d.showModal(); ta.focus(); };
-  $("#report .cancel").onclick = () => d.close();
+  // cancel throws the draft away; a tap outside only puts it aside
+  $("#report .cancel").onclick = () => { ta.value = ""; setImage(null); d.close(); };
 
   // A screenshot, picked, dropped or pasted: shrunk to a JPEG no bigger than 1600px on its longer side.
   let image = null;
@@ -764,7 +773,18 @@ function duelPage(id) {
 
   const join = (name) => post(`${base}/join`, { player: me, name });
   const savedName = store.get("sd-name");
-  if (savedName) { $("#name").value = savedName; join(savedName); }
+  // Joined on the first view: in the lobby, or to refresh your name if you're already in. Mid-game you start out watching.
+  let greeted = false;
+  if (savedName) { $("#name").value = savedName; $("#latename").value = savedName; }
+  $("#watch").onsubmit = async (e) => {
+    e.preventDefault();
+    const name = $("#latename").value.trim();
+    if (!name) return $("#latename").focus();
+    store.set("sd-name", name);
+    $("#name").value = name;
+    const r = await join(name);
+    if (r.view) apply(r.view);
+  };
   // your name in the lobby list is its own input: shown, with a pencil, or being edited
   let editing = !savedName;
   const showMine = () => {
@@ -814,6 +834,9 @@ function duelPage(id) {
     es.addEventListener("signal", (e) => { heard = Date.now(); const m = JSON.parse(e.data); voice.onSignal(m.from, m.data); });
   };
   const voice = voiceChat(base, () => view && voiceBar(view));
+  intoRematch = (next) => { try { if (voice.state.status === "on") sessionStorage.setItem(VOICE_INTO, next); } catch {} };
+  let rejoinVoice = false;  // came here from a rematch while in voice: join once we're a player here
+  try { rejoinVoice = sessionStorage.getItem(VOICE_INTO) === id; sessionStorage.removeItem(VOICE_INTO); } catch {}
   connect();
   setInterval(() => Date.now() - heard > 40_000 && connect(), 5_000);
   document.addEventListener("visibilitychange", () => !document.hidden && Date.now() - heard > 20_000 && connect());
@@ -830,6 +853,7 @@ function duelPage(id) {
     view = currentView = v;
     skew = view.now - Date.now();
     voice.sync(v.voice);
+    if (rejoinVoice && v.players.some((p) => p.id === me)) { rejoinVoice = false; voice.join(); }
     render();
   }
 
@@ -847,6 +871,10 @@ function duelPage(id) {
 
   function render() {
     const v = view;
+    if (!greeted) {
+      greeted = true;
+      if (savedName && (v.status === "lobby" || v.players.some((p) => p.id === me))) join(savedName);
+    }
     remember(v);
     $(".no").textContent = `#${v.number}${v.number === today ? " (today)" : ""}`;
     // semantle.com's archive only has past puzzles; today's is its front page
@@ -855,6 +883,7 @@ function duelPage(id) {
     const lobby = v.status === "lobby";
 
     $("#lobby").hidden = !lobby;
+    $("#watch").hidden = inIt || lobby || v.status === "over" || v.players.length >= v.max;
     $("#share").hidden = !lobby;
     if (lobby) {
       // you first (your entry is kept, not redrawn, so typing in it isn't interrupted), then everyone else
@@ -979,7 +1008,11 @@ function duelPage(id) {
     nav.hidden = !(mine ? mine.finish : v.status === "over");
     if (nav.hidden) return;
     const kids = [];
-    if (v.next) kids.push(el("a", { href: `/d/${v.room}`, class: "lead" }, "join the rematch →"));
+    if (v.next) {
+      const a = el("a", { href: `/d/${v.room}`, class: "lead" }, "join the rematch →");
+      a.onclick = () => intoRematch(v.next);
+      kids.push(a);
+    }
     else if (mine && v.players.length > 1 && !picking) {
       const b = el("button", { class: "lead", type: "button" }, "rematch");
       b.onclick = () => { picking = true; render(); };
@@ -1054,6 +1087,9 @@ function duelPage(id) {
         render();
       };
       div.append(form);
+    } else if (!mine && v.players.length === 2 && v.players.some((q) => q.id === me) && (v.status === "playing" || v.status === "over")) {
+      // side by side: an empty stand-in for the box, so both lists start at the same height
+      div.append(el("form", { class: "slot", "aria-hidden": "true" }, el("input", { class: "line", tabindex: "-1", disabled: "disabled" }), el("button", { class: "submit", type: "button", tabindex: "-1" }, "guess")));
     }
 
     const ol = el("ol", {});
