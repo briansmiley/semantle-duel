@@ -94,8 +94,17 @@ function newId() {
 // here (not saved): it goes out with every view, and the offers, answers and ICE candidates
 // between two of them are passed along the event stream, the sender stamped by us, never read.
 function viewOf(room, player, now) {
-  return { ...room.duel.viewFor(player, now), voice: [...room.voice].map(([id, v]) => ({ id, muted: v.muted })) };
+  return { ...room.duel.viewFor(player, now), voice: [...room.voice].map(([id, v]) => ({ id, muted: v.muted })), here: present(room) };
 }
+
+/** The players with the page open right now. */
+function present(room) {
+  return [...room.duel.players.keys()].filter((id) => [...room.listeners].some((l) => l.player === id));
+}
+
+// In a lobby, someone whose page has been gone this long is dropped from it, so a player who left can't hold
+// up the start. Long enough for a phone to switch apps and come back.
+const LOBBY_GONE_MS = Number(process.env.LOBBY_GONE_MS ?? 45_000);
 
 function broadcast(room) {
   const now = Date.now();
@@ -200,7 +209,7 @@ async function handle(req, res) {
     res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
     const l = { player, res };
     room.listeners.add(l);
-    if (duel.touch(player, Date.now())) { await save(duel); broadcast(room); }
+    if (duel.touch(player, Date.now()) || (duel.status(Date.now()) === "lobby" && duel.players.has(player))) { await save(duel); broadcast(room); }  // (in the lobby: they're back)
     send(res, viewOf(room, player, Date.now()));
     // a named event (not a comment) so the page can tell a dead stream from a quiet one
     const ping = setInterval(() => res.write("event: ping\ndata: \n\n"), 15_000);
@@ -208,7 +217,9 @@ async function handle(req, res) {
       clearInterval(ping);
       room.listeners.delete(l);
       // their last page gone: out of voice (a page that reconnects says it is in again)
-      if (room.voice.has(player) && ![...room.listeners].some((x) => x.player === player)) { room.voice.delete(player); broadcast(room); }
+      const gone = ![...room.listeners].some((x) => x.player === player);
+      if (gone && room.voice.has(player)) room.voice.delete(player);
+      if (gone && (room.voice.size || room.duel.players.has(player))) broadcast(room);  // others see them away
     });
     return;
   }
@@ -295,10 +306,22 @@ async function handle(req, res) {
   return json(res, 200, { ok: true, view: viewOf(room, player, Date.now()) });
 }
 
-// Stop the clock in duels where everyone still playing has gone quiet.
+// Stop the clock in duels where everyone still playing has gone quiet; drop whoever has left a lobby.
 setInterval(() => {
   const now = Date.now();
-  for (const room of rooms.values()) if (room.duel.checkAway(now)) save(room.duel).then(() => broadcast(room), console.error);
+  for (const room of rooms.values()) {
+    if (room.duel.checkAway(now)) save(room.duel).then(() => broadcast(room), console.error);
+    if (room.duel.status(now) !== "lobby") { room.gone = null; continue; }
+    room.gone ??= new Map();  // player -> since when their page has been gone
+    const here = new Set(present(room));
+    let dropped = false;
+    for (const id of [...room.duel.players.keys()]) {
+      if (here.has(id)) { room.gone.delete(id); continue; }
+      if (!room.gone.has(id)) room.gone.set(id, now);
+      else if (now - room.gone.get(id) > LOBBY_GONE_MS && room.duel.leave(id, now)) { room.gone.delete(id); dropped = true; }
+    }
+    if (dropped) save(room.duel).then(() => broadcast(room), console.error);
+  }
 }, 5_000).unref();
 
 // Drop idle duels from memory; they stay on disk.

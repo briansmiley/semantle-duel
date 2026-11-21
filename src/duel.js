@@ -117,6 +117,12 @@ export class Duel {
     this.seen[playerId] = now;
   }
 
+  /** Out of the lobby (they left before it started). Returns true if they were in it. */
+  leave(playerId, now) {
+    if (this.status(now) !== "lobby") return false;
+    return this.players.delete(playerId);
+  }
+
   start(now) {
     if (this.status(now) !== "lobby") throw new DuelError("already started");
     if (this.players.size < 2) throw new DuelError("waiting for an opponent");
