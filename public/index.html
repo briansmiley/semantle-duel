@@ -628,7 +628,7 @@ let currentView = null;  // the duel on screen, if any
     const r = await post("/feedback", {
       kind, text: ta.value, player: me, name: store.get("sd-name") ?? "", image,
       context: {
-        page: location.pathname + location.search, duel: v?.id, number: v?.number, status: v?.status,
+        page: location.pathname + location.search, room: v ? v.room ?? v.id : undefined, duel: v?.id, number: v?.number, mode: v?.mode, status: v?.status,
         guesses: v?.players.find((p) => p.id === me)?.guesses.length,
         browser: navigator.userAgent, screen: `${innerWidth}×${innerHeight} @${devicePixelRatio}x ${matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"}`,
         errors,
