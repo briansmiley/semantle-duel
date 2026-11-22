@@ -321,6 +321,8 @@ const store = {
   get(k) { try { return localStorage.getItem(k); } catch { return null; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch {} },
 };
+// History from before the 2026-11-21 clear-out points at rounds that no longer exist: forget it.
+try { localStorage.removeItem("sd-duels"); localStorage.removeItem("sd-made"); } catch {}
 const me = store.get("sd-player") || (() => { const id = crypto.randomUUID?.() ?? [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join(""); store.set("sd-player", id); return id; })();
 const path = location.pathname.split("/").filter(Boolean);
 
@@ -336,7 +338,7 @@ async function post(url, data) {
 
 /* ---------- past duels (this browser only) ---------- */
 function pastDuels() {
-  try { return JSON.parse(store.get("sd-duels")) || []; } catch { return []; }
+  try { return JSON.parse(store.get("sd-history")) || []; } catch { return []; }
 }
 
 // Finishers in order: found it (fastest first), then gave up.
@@ -356,7 +358,7 @@ function remember(v) {
     at: Date.now(),
   };
   const list = [entry, ...pastDuels().filter((d) => d.id !== v.id)].slice(0, 200);
-  store.set("sd-duels", JSON.stringify(list));
+  store.set("sd-history", JSON.stringify(list));
 }
 
 // Your rooms (this browser's), most recent first: { room, others, rounds (started, newest first) }.
@@ -445,12 +447,12 @@ async function rematch(id, puzzle, button, mode) {
 }
 
 // Rooms this browser made: opening one joins you, as does opening a room you've played in (but no other).
-const made = () => { try { return JSON.parse(store.get("sd-made")) || []; } catch { return []; } };
+const made = () => { try { return JSON.parse(store.get("sd-rooms-made")) || []; } catch { return []; } };
 
 async function newDuel(puzzle, button, extra = {}) {
   button.disabled = true;
   const r = await post("/duels", { puzzle, ...extra });
-  if (r.id) store.set("sd-made", JSON.stringify([r.id, ...made()].slice(0, 50)));
+  if (r.id) store.set("sd-rooms-made", JSON.stringify([r.id, ...made()].slice(0, 50)));
   if (r.id) location.href = `/d/${r.id}`; else button.disabled = false;
   return r;
 }
