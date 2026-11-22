@@ -1,0 +1,29 @@
+# Push to `staging` -> https://semantle-duel-staging.fly.dev ; push to `main` -> https://semantle-duel.fly.dev .
+# Duels live on each app's `duels` volume, so they survive a deploy.
+name: Deploy
+
+on:
+  push:
+    branches: [main, staging]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch replaces an older run.
+concurrency:
+  group: deploy-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    if: github.ref_name == 'main' || github.ref_name == 'staging'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      APP: ${{ github.ref_name == 'main' && 'semantle-duel' || 'semantle-duel-staging' }}
+      FLY_API_TOKEN: ${{ github.ref_name == 'main' && secrets.FLY_API_TOKEN_PROD || secrets.FLY_API_TOKEN_STAGING }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@98172f70657cb3e15db199af139be99bd3e61200 # master as of 2026-11-21
+      - run: flyctl deploy --app "$APP" --config fly.toml --remote-only --ha=false

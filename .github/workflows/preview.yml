@@ -1,0 +1,113 @@
+# A pull request into staging -> its own app, https://semantle-duel-pr-<number>.fly.dev, with an empty volume of its
+# own. Each push deploys the merge of the PR into staging; closing the PR destroys the app. It gets no secrets: no
+# Linear, Discord or Claude keys, so feedback sent from a preview is only kept on its volume. PRs from forks get none:
+# they are not given the token.
+name: Preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    branches: [staging]
+
+permissions:
+  contents: read
+
+# A newer push to the PR replaces an older run; closing it replaces a deploy still going.
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  APP: semantle-duel-pr-${{ github.event.pull_request.number }}
+  FLY_ORG: personal
+  PR: ${{ github.event.pull_request.number }}
+  MARK: '<!-- semantle-duel-preview -->'
+
+jobs:
+  deploy:
+    if: github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: write # the comment with the address
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN_PREVIEW }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: The token is there
+        run: |
+          if [ -z "$FLY_API_TOKEN" ]; then echo "::error::No FLY_API_TOKEN_PREVIEW secret."; exit 1; fi
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@98172f70657cb3e15db199af139be99bd3e61200 # master as of 2026-11-21
+      - name: Make the app, the first time
+        run: |
+          # Listed on its own line: a list that fails stops the step, rather than reading as "no such app".
+          apps=$(flyctl apps list --org "$FLY_ORG" --json)
+          if jq -e --arg app "$APP" 'any(.[]; .Name == $app)' <<< "$apps" > /dev/null; then
+            echo "$APP is there."
+          else
+            flyctl apps create "$APP" --org "$FLY_ORG"
+          fi
+      - name: Its volume, before any deploy mounts it
+        run: |
+          # fly.toml mounts `duels` at /data. It has to be made before the first deploy, since a mount added to a
+          # machine that has no volume destroys the machine.
+          # Listed on its own line: a list that fails stops the step, rather than making a second volume.
+          volumes=$(flyctl volumes list --app "$APP" --json)
+          if jq -e 'any(.[]?; .name == "duels" and (.state | test("destroy") | not))' <<< "$volumes" > /dev/null; then
+            echo "$APP has its volume."
+          else
+            flyctl volumes create duels --app "$APP" --region sjc --size 1 --yes
+          fi
+      - name: Deploy
+        run: flyctl deploy --app "$APP" --config fly.toml --remote-only --ha=false
+      - name: Say where, on the PR
+        env:
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # One comment per PR: the address once, then a line for each deploy, so it keeps its own history.
+          line="- $(date -u '+%Y-%m-%d %H:%M UTC'): deployed [\`${SHA:0:7}\`](https://github.com/$GITHUB_REPOSITORY/commit/$SHA)"
+          id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$MARK\"))) | .id" | head -n 1)
+          if [ -n "$id" ]; then
+            was=$(gh api "repos/$GITHUB_REPOSITORY/issues/comments/$id" --jq .body)
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -f body="$was
+          $line" > /dev/null
+          else
+            gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR/comments" -f body="$MARK
+          Preview: https://$APP.fly.dev
+
+          $line" > /dev/null
+          fi
+
+  destroy:
+    if: github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write # the comment with the address
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN_PREVIEW }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@98172f70657cb3e15db199af139be99bd3e61200 # master as of 2026-11-21
+      - name: Destroy the app
+        run: |
+          # Listed on its own line: a list that fails stops the step, rather than reading as "no such app".
+          apps=$(flyctl apps list --org "$FLY_ORG" --json)
+          if jq -e --arg app "$APP" 'any(.[]; .Name == $app)' <<< "$apps" > /dev/null; then
+            flyctl apps destroy "$APP" --yes
+          else
+            echo "No $APP to destroy."
+          fi
+      - name: Say so, on the PR
+        run: |
+          id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$MARK\"))) | .id" | head -n 1)
+          if [ -n "$id" ]; then
+            was=$(gh api "repos/$GITHUB_REPOSITORY/issues/comments/$id" --jq .body)
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -f body="$was
+          - $(date -u '+%Y-%m-%d %H:%M UTC'): taken down with the PR, its volume with it" > /dev/null
+          fi
