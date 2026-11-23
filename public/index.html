@@ -74,6 +74,7 @@
   #home .open .past { margin-top: 0; }
   #home .past a { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: .8rem; padding: .35rem 0; color: var(--faint); text-decoration: none; border-bottom: 1px solid var(--rule); }
   #home .past a:hover { color: var(--ink); }
+  #home .past small { margin-left: .5rem; font-size: .75rem; opacity: .75; white-space: nowrap; }
   #home .past .w { color: var(--hot); }
 
   /* duel */
@@ -386,6 +387,7 @@ function remember(v) {
     found: mine.finish?.found ?? null,
     place: v.status === "over" && !v.collab && mine.finish?.found ? standings(v).indexOf(mine) + 1 : null,  // co-op has no places, so no wins
     secret: v.secret, time: mine.finish?.time ?? null,
+    start: v.startsAt,  // when the round began (at is just when this page last saw it)
     at: Date.now(),
   };
   const list = [entry, ...pastDuels().filter((d) => d.id !== v.id)].slice(0, 200);
@@ -425,15 +427,23 @@ async function roomsNow() {
   return [...merged.values()].sort((a, b) => b.at - a.at);
 }
 
+// When a room started: the time if that was today, else a short date.
+function startedAt(ms) {
+  const t = new Date(ms);
+  return t.toDateString() === new Date().toDateString()
+    ? t.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    : t.toLocaleDateString([], { month: "short", day: "numeric", ...(t.getFullYear() === new Date().getFullYear() ? {} : { year: "numeric" }) });
+}
+
 // One line per room you've played in: who, how many rounds, your wins, and how the latest went.
 function pastList(rooms) {
   rooms = rooms.filter((r) => r.rounds.length && r.others.size);
   if (!rooms.length) return null;
   return el("ol", { class: "past" }, ...rooms.map((r) => {
-    const d = r.rounds[0], wins = r.rounds.filter((x) => x.place === 1).length, n = r.rounds.length;
+    const d = r.rounds[0], started = Math.min(...r.rounds.map((x) => x.start ?? x.at)), wins = r.rounds.filter((x) => x.place === 1).length, n = r.rounds.length;
     return el("li", {},
       el("a", { href: `/d/${r.room}` },
-        el("span", {}, `vs ${[...r.others].join(", ")}`),
+        el("span", {}, `vs ${[...r.others].join(", ")}`, el("small", {}, startedAt(started))),
         el("span", { class: "num" }, `${n} ${n === 1 ? "round" : "rounds"}${wins ? ` · ${wins} won` : ""}`),
         el("span", { class: d.place === 1 ? "w" : "" },
           d.found === true ? `${d.place ? ordinal(d.place) : "found"} · ${d.secret}`
