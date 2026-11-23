@@ -187,6 +187,17 @@
   #tally { margin: .3rem 0 .6rem; color: var(--faint); font-size: .95rem; display: grid; gap: .15rem; }
   #tally b { font-weight: 400; color: var(--ink); }
   #tally .lead b { color: var(--hot); }
+  #graph { margin: .3rem 0 .8rem; max-width: 40rem; color: var(--faint); font-size: .95rem; }
+  #graph .opts { display: flex; flex-wrap: wrap; gap: .2rem 1.4rem; }
+  #graph .modes { flex-wrap: wrap; gap: .1rem .9rem; }
+  #graph .key { display: inline-block; width: 22px; margin-right: .3em; }
+  #graph .key svg { display: block; width: 22px; height: 6px; }
+  #graph .plot { display: block; width: 100%; height: auto; overflow: visible; margin-top: .4rem; }
+  #graph .plot text { fill: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums; }
+  #graph .plot .rule { stroke: var(--rule); }
+  #graph .plot .zero { stroke: var(--faint); }
+  #graph path { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  #graph circle { stroke: var(--paper); stroke-width: 1.5; }
 
   ol { list-style: none; margin: .5em 0 0; padding: 0; }
   li { display: grid; grid-template-columns: 2em minmax(0, 1fr) 4.6em 8em; align-items: center; gap: .6em; padding: .32em 0; border-bottom: 1px solid var(--rule); }
@@ -225,8 +236,8 @@
 
   /* compete or collab, chosen before a round */
   .modes { display: inline-flex; gap: .9rem; align-items: baseline; }
-  #lobby .modes button, #after .modes button { color: var(--faint); border-bottom: 1.5px solid transparent; padding-bottom: 1px; }
-  #lobby .modes button[aria-pressed="true"], #after .modes button[aria-pressed="true"] { color: var(--ink); border-color: var(--hot); }
+  #lobby .modes button, #after .modes button, #graph .modes button { color: var(--faint); border-bottom: 1.5px solid transparent; padding-bottom: 1px; }
+  #lobby .modes button[aria-pressed="true"], #after .modes button[aria-pressed="true"], #graph .modes button[aria-pressed="true"] { color: var(--ink); border-color: var(--hot); }
   .modes button:disabled { cursor: default; }
   /* a co-op round: one board, with a column for who guessed each word */
   #board.together { grid-template-columns: minmax(0, 38rem); }
@@ -325,6 +336,7 @@
   <div id="banner" hidden></div>
   <nav id="after" hidden></nav>
   <div id="tally" hidden></div>
+  <div id="graph" hidden></div>
   <section id="lobby" hidden>
     <div class="who"><span id="mine"><form id="nameform"><input class="line" id="name" placeholder="your name" maxlength="24" autocomplete="off"></form><span class="me"></span><button type="button" class="pencil" title="change your name" aria-label="change your name"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4"/></svg></button><button type="button" class="joinbtn">join</button></span><span class="others"></span></div>
     <div class="mode"></div>
@@ -1129,6 +1141,7 @@ function duelPage(id) {
     }
     after(v, mine);
     record(v, mine);
+    graph(v);
     pausebar(v, mine);
     voiceBar(v);
 
@@ -1277,8 +1290,77 @@ function duelPage(id) {
         el("a", { href: `/archive?rematch=${v.id}&collab=${collab ? 1 : 0}` }, "the archive"),
       ));
     }
+    if (v.status === "over" && v.players.some((p) => p.guesses.some((g) => !g.hint))) {
+      const b = el("button", { type: "button", class: "quiet", "aria-expanded": String(chart.open) }, chart.open ? "hide graph" : "graph");
+      b.onclick = () => { chart.open = !chart.open; render(); };
+      kids.push(b);
+    }
     kids.push(el("a", { href: "/", class: "quiet" }, "home"));
     nav.replaceChildren(...kids);
+  }
+
+  // The finished round as a chart: each player's similarity, by guess number or time, raw or as a rolling
+  // average. Hints are left out, being nobody's guess. Only once it's over, so it can't show a race still running.
+  let chart = { open: false, x: "n", avg: false, who: null }, chartW = 0;  // who: one player's id, or null for everyone
+  addEventListener("resize", () => { if (view && chart.open && $("#graph").clientWidth !== chartW) graph(view); });
+  function graph(v) {
+    const box = $("#graph");
+    box.hidden = !chart.open || v.status !== "over";
+    if (box.hidden) return;
+    const byTime = chart.x === "t";
+    const series = v.players.map((p, i) => {
+      const gs = p.guesses.filter((g) => !g.hint);
+      const points = gs.map((g, k) => {
+        const recent = chart.avg ? gs.slice(Math.max(0, k - 4), k + 1) : [g];  // up to the last five of their own
+        return [byTime ? Math.max(0, g.at - v.startsAt) : g.n, recent.reduce((sum, h) => sum + h.score, 0) / recent.length];
+      });
+      // a colour and a dash each, so no two of the eight players look alike, in colour or without it
+      return { p, gs, points, color: GRAPH_COLORS[i % 4], dash: GRAPH_DASHES[(i + (i >> 2)) % 4] };
+    });
+    // the axes fit everyone's raw scores, so they hold still as the options change
+    const scores = series.flatMap((s) => s.gs.map((g) => g.score)), xs = series.flatMap((s) => s.points.map(([x]) => x));
+    const yStep = Math.max(...scores, 0) - Math.min(...scores, 0) > 60 ? 25 : 10;
+    const yLo = Math.floor(Math.min(...scores, 0) / yStep) * yStep, yHi = Math.max(yLo + yStep, Math.ceil(Math.max(...scores) / yStep) * yStep);
+    const xLo = byTime ? 0 : 1, xHi = Math.max(xLo + (byTime ? 1000 : 1), ...xs);
+    const xOpts = byTime ? [15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 14400].map((s) => s * 1000) : [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
+    const xStep = xOpts.find((s) => (xHi - xLo) / s <= 5) ?? xOpts.at(-1);
+
+    chartW = box.clientWidth;
+    const W = chartW || 600, H = 200, L = 30, R = 10, T = 18, B = 22;
+    const sx = (x) => (L + ((x - xLo) / (xHi - xLo)) * (W - L - R)).toFixed(1);
+    const sy = (y) => (T + ((yHi - y) / (yHi - yLo)) * (H - T - B)).toFixed(1);
+    let marks = `<text x="0" y="10">similarity</text>`;
+    for (let y = yLo; y <= yHi; y += yStep) marks += `<line class="${y === 0 ? "zero" : "rule"}" x1="${L}" x2="${W - R}" y1="${sy(y)}" y2="${sy(y)}"/><text x="${L - 5}" y="${+sy(y) + 4}" text-anchor="end">${y}</text>`;
+    for (let x = Math.ceil(xLo / xStep) * xStep; x <= xHi; x += xStep) marks += `<text x="${sx(x)}" y="${H - 5}" text-anchor="middle">${byTime ? mmss(x) : x}</text>`;
+    for (const s of series) {
+      if (!s.points.length || (chart.who && chart.who !== s.p.id)) continue;
+      const [endX, endY] = s.points.at(-1);
+      if (s.points.length > 1) marks += `<path d="M${s.points.map(([x, y]) => `${sx(x)} ${sy(y)}`).join("L")}" style="stroke:var(${s.color})" stroke-dasharray="${s.dash}"/>`;
+      marks += `<circle cx="${sx(endX)}" cy="${sy(endY)}" r="4" style="fill:var(${s.color})"/>`;
+    }
+    const plot = el("div", {});
+    plot.innerHTML = `<svg class="plot" viewBox="0 0 ${W} ${H}" role="img" aria-label="each player's similarity over the round">${marks}</svg>`;  // numbers only: names stay in the buttons
+
+    const opts = (key, list) => el("span", { class: "modes" }, ...list.map(([value, label, off]) => {
+      const b = el("button", { type: "button", "aria-pressed": String(chart[key] === value) }, label);
+      b.disabled = !!off;
+      b.onclick = () => { chart[key] = value; graph(view); };
+      return b;
+    }));
+    const swatch = (s) => {
+      const k = el("span", { class: "key" });
+      k.innerHTML = `<svg viewBox="0 0 22 6" aria-hidden="true"><line x1="1" x2="21" y1="3" y2="3" stroke-width="2" stroke-linecap="round" style="stroke:var(${s.color})" stroke-dasharray="${s.dash}"/></svg>`;
+      return k;
+    };
+    const paused = v.endedAt - v.startsAt - v.elapsed;  // the view has only the total: guess times can't be moved back past each pause
+    box.replaceChildren(
+      el("div", { class: "opts" },
+        opts("x", [["n", v.collab ? "room’s guess #" : "guess #"], ["t", "time"]]),
+        opts("avg", [[false, "raw"], [true, "avg of last 5"]]),
+        opts("who", [[null, "everyone"], ...series.map((s) => [s.p.id, el("span", {}, swatch(s), s.p.id === me ? "you" : s.p.name, s.gs.length ? "" : " –"), !s.gs.length])])),
+      plot.firstChild,
+      byTime && paused >= 1000 ? el("small", {}, `time includes ${mmss(paused)} paused`) : "",
+    );
   }
 
   // Compete or collab. `pick` (a new value) is left out for someone who only gets to see it.
@@ -1488,6 +1570,9 @@ function duelPage(id) {
     return li;
   }
 }
+
+// One per player in the finished round's chart (see graph), by their place in the room.
+const GRAPH_COLORS = ["--hot", "--cool", "--ink", "--warm"], GRAPH_DASHES = ["", "7 4", "1 4", "9 4 1 4"];
 
 // Semantle's proximity column: rank out of 1000 with a bar, or a temperature word.
 function proximity(g) {
