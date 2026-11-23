@@ -468,7 +468,8 @@ function openList(rooms) {
   if (!open.length) return null;
   return el("div", { class: "open" }, el("h3", {}, "open now"), el("ol", { class: "past" }, ...open.map((r) => el("li", {},
     el("a", { href: `/d/${r.room}` },
-      el("span", {}, r.others.size ? `vs ${[...r.others].join(", ")}` : "your room"),
+      el("span", {}, r.others.size ? `vs ${[...r.others].join(", ")}` : "your room",
+        ...(r.rounds.length ? [el("small", {}, startedAt(Math.min(...r.rounds.map((x) => x.start ?? x.at))))] : [])),
       el("span", {}, ""),
       el("span", { class: "w" }, r.h.racing ? "you’re mid-race →" : `lobby · ${r.h.here} here →`),
     ),
