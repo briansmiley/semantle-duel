@@ -616,7 +616,7 @@ addEventListener("unhandledrejection", (e) => errors.push(`unhandled: ${e.reason
 let currentView = null;  // the duel on screen, if any
 
 {
-  const d = $("#report"), ta = $("#report textarea"), send = $("#report .send"), said = $("#report .said");
+  const d = $("#report"), ta = $("#report textarea"), said = $("#report .said");
   let kind = "bug", sending = false;
   const lock = (on) => { sending = on; for (const el of $("#report form").elements) el.disabled = on; };  // while a send is in flight nothing may change
   const pick = (k) => {
@@ -625,7 +625,7 @@ let currentView = null;  // the duel on screen, if any
     ta.placeholder = k === "bug" ? "What’s wrong?" : "What could be better?";
   };
   for (const b of $("#report h2").children) b.onclick = () => pick(b.dataset.kind);
-  $("#bug").onclick = () => { pick("bug"); said.textContent = ""; lock(false); d.showModal(); follow(); ta.focus(); };
+  $("#bug").onclick = () => { pick("bug"); said.textContent = ""; d.showModal(); follow(); ta.focus(); };
   // iOS doesn't resize the page for the keyboard and can leave it scrolled afterwards, so while open the
   // dialog tracks the visible area; when that's too short for the whole form it becomes just the input.
   const vv = window.visualViewport, slip = $("#report form");
@@ -680,8 +680,8 @@ let currentView = null;  // the duel on screen, if any
         errors,
       },
     });
-    sending = false;
-    if (!r.ok) { said.textContent = r.error ?? "didn’t send, try again"; lock(false); ta.focus(); return; }
+    lock(false);
+    if (!r.ok) { said.textContent = r.error ?? "didn’t send, try again"; ta.focus(); return; }
     said.textContent = "";
     ta.value = "";
     setImage(null);
