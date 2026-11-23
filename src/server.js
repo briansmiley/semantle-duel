@@ -279,9 +279,9 @@ async function handle(req, res) {
   } else if (action === "hint") {
     if (duel.askHint(player, !!msg.want, now)) {
       // Everyone agreed.
-      const best = duel.bestRank();
+      const best = duel.bestRank(now);
       if (best >= 999) { duel.hintAsks = []; await save(duel); broadcast(room); return json(res, 409, { error: "nothing closer but the word itself" }); }
-      // Semantle's own hint, given the best rank anyone has (about a quarter of the way to the word).
+      // Semantle's own hint, given the best rank among those still racing (about a quarter of the way to the word).
       // Should that fail: a neighbour a third of the way there, by rank.
       const near = await semantle.neighbours(duel.puzzle.secret);
       const theirs = await semantle.hint(duel.puzzle.secret, best).catch(() => null);
