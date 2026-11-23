@@ -435,7 +435,7 @@ function startedAt(ms) {
     : t.toLocaleDateString([], { month: "short", day: "numeric", ...(t.getFullYear() === new Date().getFullYear() ? {} : { year: "numeric" }) });
 }
 
-// One line per room you've played in: who, how many rounds, your wins, and how the latest went.
+// One line per room you've played in: who, when it started, how many rounds, your wins, and how the latest went.
 function pastList(rooms) {
   rooms = rooms.filter((r) => r.rounds.length && r.others.size);
   if (!rooms.length) return null;
