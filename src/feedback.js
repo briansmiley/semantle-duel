@@ -2,17 +2,23 @@
 // Each report is written to the data volume first (DATA_DIR/feedback/<id>.json, and its screenshot, if any,
 // beside it as <id>.jpg); only then is the sender answered. After that it is passed on to whichever of these is
 // set up, and the file notes where it went:
-// - FEEDBACK_WEBHOOK: a Discord webhook URL; the report is posted to its channel, the screenshot attached.
+// - FEEDBACK_WEBHOOK: a Discord webhook URL; the report is posted to its channel, the screenshot attached. The
+//   post's id is kept (in the file, and as a `**Discord:**` line on the issue): it is where the auto-fanout (kept
+//   outside this repo) opens a thread once a PR for it is ready.
 // - LINEAR_API_KEY (a personal API key): an issue is filed in LINEAR_TEAM (a team key, default SMI), in
-//   LINEAR_PROJECT (by name, default "Semantle Duel") if it exists, labelled Bug or Feature if the team has one;
-//   the screenshot goes up to Linear's storage and into the description. It's assigned to LINEAR_ASSIGNEE (an
-//   email) if set, else to the API key's owner.
+//   LINEAR_PROJECT (by name, default "Semantle Duel") if it exists, labelled Bug or Feature and `auto` (each made
+//   if the team has none of that name); the screenshot goes up to Linear's storage and into the description. It's
+//   assigned to LINEAR_ASSIGNEE (an email) if set, else to the API key's owner. `auto` hands the issue to the
+//   auto-fanout, which implements it, and each one it takes up costs a Claude run: so only so many issues labelled
+//   so may be open at once (not Done or Canceled), of one sender's (AUTO_PER_SENDER, default 5) and of everyone's
+//   (AUTO_OPEN, default 20), as Linear says when the issue is filed. Past either, the issue is filed without it.
+//   A sender is the player id, written on the issue hashed (`**Sender:**`).
 // - ANTHROPIC_API_KEY (optional, alongside either): Claude Haiku titles each report and judges how much it matters
 //   (the issue's priority; never Urgent, since it's a player's word). Without it, or if that fails, a report is
 //   titled by its first line and filed with no priority.
 
 import { writeFile, rename, mkdir, readdir, stat } from "node:fs/promises";
-import { randomBytes } from "node:crypto";
+import { randomBytes, createHash } from "node:crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import { jsonSchemaOutputFormat } from "@anthropic-ai/sdk/helpers/json-schema";
 
@@ -24,12 +30,20 @@ const TITLE_MAX = 80;
 // duels are saved on the same volume, and a full disk would stop those.
 const MAX_KEPT_IMAGE_BYTES = 200 << 20;
 const IMAGE_RE = /^data:image\/jpeg;base64,([A-Za-z0-9+/=]+)$/;  // what the page makes of any picture
+const SNOWFLAKE = /^\d{1,20}$/;  // a Discord message id
+// Every way of ending a line Markdown might read (or a reader of the issue might), beyond a bare newline.
+const BREAKS = /\r\n?|[\v\f\u0085\u2028\u2029]/g;
 
 /** At most `max` characters, with an ellipsis where it was cut. */
 const clip = (s, max) => {
   const chars = Array.from(s);
   return chars.length > max ? `${chars.slice(0, max - 1).join("")}…` : s;
 };
+/** What a player sent for one line of the issue (a name, a page): any break or run of blanks in it is one space. */
+const line = (v, max) => String(v ?? "").replace(/[\s\u0085]+/g, " ").slice(0, max);
+/** Who sent a report, as the caps count them: their player id, hashed (the issue says it, and must not give the id). */
+const senderKey = (player) => createHash("sha256").update(player ? `player:${player}` : "nobody").digest("hex").slice(0, 16);
+const cap = (v, otherwise) => (/^\d+$/.test(v ?? "") ? Number(v) : otherwise);
 
 const HEADING_SCHEMA = { type: "object", properties: { title: { type: "string" }, priority: { type: "integer", enum: [2, 3, 4] } }, required: ["title", "priority"], additionalProperties: false };
 
@@ -43,6 +57,13 @@ export function feedback({ dir, env = process.env }) {
   const webhook = env.FEEDBACK_WEBHOOK || null;
   const linear = env.LINEAR_API_KEY ? { key: env.LINEAR_API_KEY, team: env.LINEAR_TEAM || "SMI", project: env.LINEAR_PROJECT || "Semantle Duel", assignee: env.LINEAR_ASSIGNEE || null } : null;
   const claude = env.ANTHROPIC_API_KEY ? new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, timeout: PATIENCE_MS, maxRetries: 0 }) : null;
+  const caps = { perSender: cap(env.AUTO_PER_SENDER, 5), open: cap(env.AUTO_OPEN, 20) };
+  let filing = Promise.resolve(); // issues are counted and filed one at a time: two at once must not both take the last place
+  const inTurn = (does) => {
+    const done = filing.then(does, does);
+    filing = done.catch(() => {});
+    return done;
+  };
   const ready = mkdir(dir, { recursive: true });
   let kept = ready.then(async () => {  // bytes of screenshots on the volume so far
     let n = 0;
@@ -97,7 +118,7 @@ export function feedback({ dir, env = process.env }) {
     if (!res.ok || !body?.data || body.errors?.length) throw new Error(`Linear: ${body?.errors?.[0]?.message ?? res.status}`);
     return body.data;
   };
-  let where = null; // Promise<{teamId, projectId, labels: {bug, idea}}>, looked up once
+  let where = null; // Promise<{teamId, projectId, labels: {bug, idea, auto}}>, looked up once
   const lookup = () => (where ??= (async () => {
     const d = await gql(
       `query($key: String!, $project: String!, $email: String!, $byEmail: Boolean!) {
@@ -105,16 +126,22 @@ export function feedback({ dir, env = process.env }) {
         users(filter: { email: { eqIgnoreCase: $email } }, first: 1) @include(if: $byEmail) { nodes { id } }
         teams(filter: { key: { eq: $key } }, first: 1) { nodes { id } }
         projects(filter: { name: { eqIgnoreCase: $project } }, first: 1) { nodes { id } }
-        issueLabels(filter: { name: { in: ["Bug", "Feature"] } }, first: 20) { nodes { id name team { key } } }
+        issueLabels(filter: { or: [{ name: { eqIgnoreCase: "Bug" } }, { name: { eqIgnoreCase: "Feature" } }, { name: { eqIgnoreCase: "auto" } }] }, first: 50) { nodes { id name isGroup team { key } } }
       }`,
       { key: linear.team.toUpperCase(), project: linear.project, email: linear.assignee ?? "", byEmail: !!linear.assignee },
     );
     const teamId = d.teams.nodes[0]?.id;
     if (!teamId) throw new Error(`Linear: no team ${linear.team}`);
-    // a team's own label wins over a workspace-wide one of the same name
-    const label = (name) => (d.issueLabels.nodes.find((l) => l.name === name && l.team?.key === linear.team.toUpperCase()) ?? d.issueLabels.nodes.find((l) => l.name === name && !l.team))?.id;
+    const label = async (name, color) => {
+      const fits = d.issueLabels.nodes.filter((l) => !l.isGroup && l.name.toLowerCase() === name.toLowerCase() && (!l.team || l.team.key === linear.team.toUpperCase()));
+      const has = fits.find((l) => l.team) ?? fits[0]; // a team's own label wins over a workspace-wide one of the same name
+      if (has) return has.id;
+      const made = await gql(`mutation($input: IssueLabelCreateInput!) { issueLabelCreate(input: $input) { issueLabel { id } } }`, { input: { name, color, teamId } });
+      return made.issueLabelCreate.issueLabel.id;
+    };
     const assigneeId = linear.assignee ? d.users?.nodes[0]?.id : d.viewer?.id;
-    return { teamId, projectId: d.projects.nodes[0]?.id, assigneeId, labels: { bug: label("Bug"), idea: label("Feature") } };
+    const labels = { bug: await label("Bug", "#d4471f"), idea: await label("Feature", "#d98b2b"), auto: await label("auto", "#5e6ad2") };
+    return { teamId, projectId: d.projects.nodes[0]?.id, assigneeId, labels };
   })().catch((e) => ((where = null), Promise.reject(e))));
 
   // The screenshot into Linear's own storage, as markdown for the description; "" if there's none or it fails.
@@ -138,14 +165,41 @@ export function feedback({ dir, env = process.env }) {
   const toLinear = async (r, heading, image) => {
     const [{ teamId, projectId, assigneeId, labels }, { title, priority }] = await Promise.all([lookup(), heading]);
     const picture = await linearImage(r, image);
-    const input = { teamId, title: `[FEEDBACK] ${title}`, description: describe(r, "markdown") + picture };
+    const sender = senderKey(r.player);
+    // the server's own lines, last; the Discord post's joins them once it's made (notePost)
+    const description = `${describe(r, "markdown")}${picture}\n\n**Report:** ${r.id}  \n**Sender:** ${sender}`;
+    const input = { teamId, title: `[FEEDBACK] ${title}`, description };
     if (priority) input.priority = priority;
     if (projectId) input.projectId = projectId;
     if (assigneeId) input.assigneeId = assigneeId;
-    if (labels[r.kind]) input.labelIds = [labels[r.kind]];
-    const d = await gql(`mutation($input: IssueCreateInput!) { issueCreate(input: $input) { issue { identifier url } } }`, { input });
-    return d.issueCreate.issue;
+    return inTurn(async () => {
+      const auto = await mayAuto(teamId, projectId, labels.auto, sender).catch((e) => (console.error("feedback", r.id, "counting the open auto issues:", e.message), false));
+      input.labelIds = [labels[r.kind], ...(auto ? [labels.auto] : [])];
+      const d = await gql(`mutation($input: IssueCreateInput!) { issueCreate(input: $input) { issue { id identifier url } } }`, { input });
+      return { ...d.issueCreate.issue, description };
+    });
   };
+
+  // Whether a new issue of `sender`'s may be labelled auto: whether fewer than the caps of the issues so labelled are
+  // open, of theirs (by the Sender line) and of every report's (by the title's [FEEDBACK]; one Brian labelled himself
+  // isn't counted). Only this game's project is counted: Nertz files into the same team, with caps of its own.
+  const mayAuto = async (teamId, projectId, label, sender) => {
+    if (!caps.perSender || !caps.open) return false;
+    const open = `team: { id: { eq: $team } }, ${projectId ? "project: { id: { eq: $project } }, " : ""}labels: { some: { id: { eq: $label } } }, state: { type: { nin: ["completed", "canceled"] } }`;
+    const had = await gql(
+      `query($team: ID!, ${projectId ? "$project: ID!, " : ""}$label: ID!, $sender: String!, $theirs: Int!, $all: Int!) {
+        theirs: issues(first: $theirs, filter: { ${open}, description: { contains: $sender } }) { nodes { id } }
+        all: issues(first: $all, filter: { ${open}, title: { startsWith: "[FEEDBACK]" } }) { nodes { id } }
+      }`,
+      { team: teamId, ...(projectId ? { project: projectId } : {}), label, sender: `**Sender:** ${sender}`, theirs: caps.perSender, all: caps.open },
+    );
+    return had.theirs.nodes.length < caps.perSender && had.all.nodes.length < caps.open;
+  };
+
+  // The post's id is only known once it's made, after the issue (so that the post can link it): the description is
+  // filed again, from the text it was filed with, with the Discord line last.
+  const notePost = (issue, post) =>
+    gql(`mutation($id: String!, $input: IssueUpdateInput!) { issueUpdate(id: $id, input: $input) { success } }`, { id: issue.id, input: { description: `${issue.description}  \n**Discord:** ${post}` } });
 
   // ---- Discord
   const toDiscord = async (r, { title }, issue, image) => {
@@ -173,16 +227,22 @@ export function feedback({ dir, env = process.env }) {
       body.append("files[0]", new Blob([image], { type: "image/jpeg" }), "screenshot.jpg");
       headers = {};
     }
-    const res = await call(webhook, { method: "POST", headers, body });
+    const url = new URL(webhook);
+    url.searchParams.set("wait", "true"); // then Discord answers with the message it made, not a bare 204
+    const res = await call(url, { method: "POST", headers, body });
     if (!res.ok) throw new Error(`Discord: ${res.status}`);
+    const made = await res.json().catch(() => null);
+    if (typeof made?.id !== "string" || !SNOWFLAKE.test(made.id)) throw new Error("Discord: answered with no message");
+    return made.id;
   };
 
   const pass = async (r, image) => {
     const heading = head(r); // asked for while Linear is looked up
     const issue = linear ? await toLinear(r, heading, image).catch((e) => (console.error("feedback", r.id, e.message), null)) : null;
     const named = await heading;
-    const discord = webhook ? await toDiscord(r, named, issue, image).then(() => true, (e) => (console.error("feedback", r.id, e.message), false)) : null;
-    await keep({ ...r, heading: named, sent: { linear: issue, discord } }).catch((e) => console.error("feedback", r.id, e));
+    const discord = webhook ? await toDiscord(r, named, issue, image).catch((e) => (console.error("feedback", r.id, e.message), false)) : null;
+    if (issue && discord) await notePost(issue, discord).catch((e) => console.error("feedback", r.id, "noting the post on the issue:", e.message));
+    await keep({ ...r, heading: named, sent: { linear: issue && { identifier: issue.identifier, url: issue.url }, discord } }).catch((e) => console.error("feedback", r.id, e));
   };
 
   /** Handle a POST /feedback body. Returns [status, json]. */
@@ -192,7 +252,9 @@ export function feedback({ dir, env = process.env }) {
     recent.set(address, [...times, now]);
     if (recent.size > 5000) recent.clear();
 
-    const text = String(msg.text ?? "").trim().slice(0, MAX_TEXT);
+    // Only the text keeps its lines, each ended by a newline alone, and the issue quotes each one (describe): so
+    // nothing sent can start a line of the issue's own and pass for the server's lines at its foot.
+    const text = String(msg.text ?? "").replace(BREAKS, "\n").trim().slice(0, MAX_TEXT);
     if (!text) return [400, { error: "say what happened" }];
     const c = typeof msg.context === "object" && msg.context ? msg.context : {};
     const m = typeof msg.image === "string" ? IMAGE_RE.exec(msg.image) : null;
@@ -204,19 +266,19 @@ export function feedback({ dir, env = process.env }) {
       kind: msg.kind === "idea" ? "idea" : "bug",
       title: clip(text.split("\n")[0].trim(), TITLE_MAX),
       text,
-      name: String(msg.name ?? "").slice(0, 24),
+      name: line(msg.name, 24),
       player: String(msg.player ?? "").slice(0, 64),
       context: {
-        page: String(c.page ?? "").slice(0, 200),
-        room: String(c.room ?? "").slice(0, 8),
-        duel: String(c.duel ?? "").slice(0, 8),
+        page: line(c.page, 200),
+        room: line(c.room, 8),
+        duel: line(c.duel, 8),
         number: Number(c.number) || null,
-        mode: String(c.mode ?? "").slice(0, 16),
-        status: String(c.status ?? "").slice(0, 16),
+        mode: line(c.mode, 16),
+        status: line(c.status, 16),
         guesses: Number(c.guesses) || 0,
-        browser: String(c.browser ?? "").slice(0, 300),
-        screen: String(c.screen ?? "").slice(0, 40),
-        errors: Array.isArray(c.errors) ? c.errors.slice(-5).map((e) => String(e).slice(0, 300)) : [],
+        browser: line(c.browser, 300),
+        screen: line(c.screen, 40),
+        errors: Array.isArray(c.errors) ? c.errors.slice(-5).map((e) => line(e, 300)) : [],
       },
     };
     if (image) r.screenshot = await keepImage(r.id, image);
@@ -237,7 +299,7 @@ function describe(r, style) {
     c.screen && `screen: ${c.screen}`,
     c.browser && `browser: ${c.browser}`,
     ...c.errors.map((e) => `error: ${e}`),
-    `report: ${r.id}`,
+    style === "plain" && `report: ${r.id}`, // (the issue says it on its own **Report:** line)
   ].filter(Boolean);
-  return style === "markdown" ? `${r.text}\n\n---\n\n${lines.map((l) => `- ${l}`).join("\n")}` : lines.join("\n");
+  return style === "markdown" ? `${r.text.split("\n").map((l) => `> ${l}`).join("\n")}\n\n---\n\n${lines.map((l) => `- ${l}`).join("\n")}` : lines.join("\n");
 }
