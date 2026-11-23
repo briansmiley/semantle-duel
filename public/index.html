@@ -1319,13 +1319,13 @@ function duelPage(id) {
   // (`first`); picking it again turns it round.
   const SORTS = {
     n: { first: -1, cmp: (a, b) => (a.at - b.at) || ((a.n ?? 1e9) - (b.n ?? 1e9)) },  // checks (n null) sit by time
-    word: { first: 1, cmp: (a, b) => (!a.word || !b.word ? (!a.word - !b.word) || ((a.n ?? 1e9) - (b.n ?? 1e9)) : a.word.localeCompare(b.word)) },  // hidden words last, in order
+    word: { first: 1, cmp: (a, b) => (a.word && b.word ? a.word.localeCompare(b.word) : 0), last: (g) => !g.word },  // hidden words last, whichever way
     score: { first: -1, cmp: (a, b) => a.score - b.score },
     rank: { first: -1, cmp: (a, b) => (a.rank ? 1000 + a.rank : a.score) - (b.rank ? 1000 + b.rank : b.score) },
   };
   function sortGuesses(list) {
-    const { cmp } = SORTS[sort.by];
-    return [...list].sort((a, b) => sort.dir * cmp(a, b) || b.score - a.score || (a.n ?? 1e9) - (b.n ?? 1e9));
+    const { cmp, last = () => false } = SORTS[sort.by];  // `last` rows stay at the end in both directions
+    return [...list].sort((a, b) => (last(a) - last(b)) || sort.dir * cmp(a, b) || b.score - a.score || (a.n ?? 1e9) - (b.n ?? 1e9));
   }
   function pickSort(by) {
     sort = { by, dir: sort.by === by ? -sort.dir : SORTS[by].first };
