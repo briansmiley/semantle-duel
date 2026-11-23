@@ -234,6 +234,7 @@
   #report h2 { font: 400 1.35rem/1.1 var(--serif); margin: 0; display: flex; gap: .9rem; align-items: baseline; }
   #report h2 button { color: var(--faint); border-bottom: 1.5px solid transparent; }
   #report h2 button[aria-pressed="true"] { color: var(--ink); border-color: var(--hot); }
+  /* short of room, the textarea gives up height first: the 11.5rem is the rest of the form (no screenshot attached) and the 8px `fit` keeps spare */
   #report textarea { font: inherit; color: inherit; background: none; border: 1px solid var(--rule); border-radius: 2px; resize: vertical; min-height: clamp(3.5em, calc(var(--vv-h, 100dvh) - 11.5rem), 6.5em); padding: .5em .65em; outline: none; -webkit-appearance: none; }
   #report textarea:focus { border-color: var(--faint); }
   #report textarea::placeholder { color: var(--faint); font-style: italic; }
