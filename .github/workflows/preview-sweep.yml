@@ -1,0 +1,41 @@
+# Daily: destroys any preview app, `semantle-duel-pr-<number>`, whose PR is closed. preview.yml destroys each one when
+# its PR closes; this catches the ones that teardown missed (a failed or cancelled run).
+name: Preview sweep
+
+on:
+  schedule:
+    - cron: '23 11 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: preview-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN_PREVIEW }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: superfly/flyctl-actions/setup-flyctl@98172f70657cb3e15db199af139be99bd3e61200 # master as of 2026-11-21
+      - name: Destroy the leftovers
+        run: |
+          # Only names of exactly this form, never semantle-duel or semantle-duel-staging; and only for a PR GitHub says
+          # is closed (an open one keeps its app, and one GitHub cannot find is left alone and reported).
+          # Listed on its own line: a list that fails fails the sweep, rather than reading as "nothing to sweep".
+          all=$(flyctl apps list --org personal --json)
+          for app in $(jq -r '.[].Name | select(test("^semantle-duel-pr-[0-9]+$"))' <<< "$all"); do
+            n=${app#semantle-duel-pr-}
+            state=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$n" --jq .state 2> /dev/null || echo unknown)
+            case "$state" in
+              open) echo "$app: PR #$n is open; kept." ;;
+              closed) echo "$app: PR #$n is closed; destroying." && flyctl apps destroy "$app" --yes ;;
+              *) echo "::warning::$app: no PR #$n found; left alone." ;;
+            esac
+          done
