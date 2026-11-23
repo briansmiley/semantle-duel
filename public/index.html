@@ -227,12 +227,14 @@
   @media (max-width: 380px) { #top .logo { font-size: 1.35rem; } }
   #top button { color: var(--faint); font-size: 1.15rem; font-style: italic; border-bottom: 1px dotted var(--faint); }
   #report { border: 0; padding: 0; background: transparent; color: var(--ink); max-width: none; max-height: none; }
+  /* open, it covers the visible area (the --vv-* are set from visualViewport while it's open) and centres the form there */
+  #report[open] { display: grid; overflow: auto; margin: 0; inset: var(--vv-top, 0px) auto auto var(--vv-left, 0px); width: var(--vv-w, 100%); height: var(--vv-h, 100dvh); }
   #report::backdrop { background: color-mix(in srgb, var(--paper) 55%, transparent); backdrop-filter: blur(3px); }
-  #report form { background: var(--paper); border: 1px solid var(--rule); box-shadow: 0 10px 40px rgb(0 0 0 / .18); width: min(30rem, calc(100vw - 32px)); padding: 1.3rem 1.3rem 1.1rem; display: grid; gap: .9rem; }
+  #report form { background: var(--paper); border: 1px solid var(--rule); box-shadow: 0 10px 40px rgb(0 0 0 / .18); width: min(30rem, calc(var(--vv-w, 100vw) - 32px)); margin: auto; padding: 1.3rem 1.3rem 1.1rem; display: grid; gap: .9rem; }
   #report h2 { font: 400 1.35rem/1.1 var(--serif); margin: 0; display: flex; gap: .9rem; align-items: baseline; }
   #report h2 button { color: var(--faint); border-bottom: 1.5px solid transparent; }
   #report h2 button[aria-pressed="true"] { color: var(--ink); border-color: var(--hot); }
-  #report textarea { font: inherit; color: inherit; background: none; border: 1px solid var(--rule); border-radius: 2px; resize: vertical; min-height: 6.5em; padding: .5em .65em; outline: none; -webkit-appearance: none; }
+  #report textarea { font: inherit; color: inherit; background: none; border: 1px solid var(--rule); border-radius: 2px; resize: vertical; min-height: clamp(3.5em, calc(var(--vv-h, 100dvh) - 11.5rem), 6.5em); padding: .5em .65em; outline: none; -webkit-appearance: none; }
   #report textarea:focus { border-color: var(--faint); }
   #report textarea::placeholder { color: var(--faint); font-style: italic; }
   /* like Nertz's: a dashed drop box, then a thumbnail with a bin on its corner */
@@ -255,10 +257,12 @@
   #report form.sent { position: relative; }
   #report .thanks { position: absolute; inset: 0; margin: 0; display: grid; place-items: center; font: italic 400 2.6rem/1 var(--serif); color: var(--hot); }
   #report form:not(.sent) .thanks { display: none; }
-  @media (max-width: 560px) {
-    #report { margin: auto 0 0; width: 100%; }
-    #report form { width: 100%; border-width: 1px 0 0; padding-bottom: calc(1.1rem + env(safe-area-inset-bottom)); }
-  }
+  /* too short for the whole form (a phone in landscape, typing): just the input, with send and cancel beside it */
+  #report.tight form { position: relative; display: flex; gap: .6rem; width: 100%; height: 100%; margin: 0; border: 0; box-shadow: none; padding: max(.45rem, env(safe-area-inset-top)) max(.7rem, env(safe-area-inset-right)) max(.45rem, env(safe-area-inset-bottom)) max(.7rem, env(safe-area-inset-left)); }
+  #report.tight :is(h2, .attach, .shot) { display: none; }
+  #report.tight textarea { flex: 1; min-width: 0; min-height: 0; resize: none; }
+  #report.tight .acts { flex-direction: column-reverse; justify-content: center; align-items: center; gap: .7rem; }
+  #report.tight .said:not(:empty) { position: absolute; left: max(1rem, calc(env(safe-area-inset-left) + .3rem)); bottom: max(.7rem, calc(env(safe-area-inset-bottom) + .25rem)); margin: 0; padding: 0 .35em; background: var(--paper); font-size: .9rem; }
 </style>
 </head>
 <body>
@@ -593,7 +597,20 @@ let currentView = null;  // the duel on screen, if any
     ta.placeholder = k === "bug" ? "What’s wrong?" : "What could be better?";
   };
   for (const b of $("#report h2").children) b.onclick = () => pick(b.dataset.kind);
-  $("#bug").onclick = () => { pick("bug"); said.textContent = ""; send.disabled = false; d.showModal(); ta.focus(); };
+  $("#bug").onclick = () => { pick("bug"); said.textContent = ""; send.disabled = false; d.showModal(); follow(); ta.focus(); };
+  // iOS doesn't resize the page for the keyboard and can leave it scrolled afterwards, so while open the
+  // dialog tracks the visible area; when that's too short for the whole form it becomes just the input.
+  const vv = window.visualViewport, slip = $("#report form");
+  let fullHeight = 0;
+  const place = (box) => { for (const k of ["top", "left", "w", "h"]) box ? d.style.setProperty(`--vv-${k}`, `${box[k]}px`) : d.style.removeProperty(`--vv-${k}`); };
+  const fit = () => {
+    if (vv.scale > 1.01) { place(null); d.classList.remove("tight"); return; }  // pinched in: the visible area says nothing about the room
+    place({ top: vv.offsetTop, left: vv.offsetLeft, w: vv.width, h: vv.height });
+    if (!d.classList.contains("tight")) fullHeight = slip.offsetHeight;  // hidden parts can't be measured, so keep the last full height
+    d.classList.toggle("tight", vv.height < fullHeight + 8);
+  };
+  const follow = () => { if (!vv) return; vv.addEventListener("resize", fit); vv.addEventListener("scroll", fit); fit(); };
+  d.addEventListener("close", () => { vv?.removeEventListener("resize", fit); vv?.removeEventListener("scroll", fit); place(null); d.classList.remove("tight"); });
   // cancel throws the draft away; a tap outside only puts it aside
   $("#report .cancel").onclick = () => { ta.value = ""; setImage(null); d.close(); };
 
