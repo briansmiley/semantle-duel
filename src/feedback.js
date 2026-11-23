@@ -173,7 +173,7 @@ export function feedback({ dir, env = process.env }) {
     if (projectId) input.projectId = projectId;
     if (assigneeId) input.assigneeId = assigneeId;
     return inTurn(async () => {
-      const auto = await mayAuto(teamId, labels.auto, sender).catch((e) => (console.error("feedback", r.id, "counting the open auto issues:", e.message), false));
+      const auto = await mayAuto(teamId, projectId, labels.auto, sender).catch((e) => (console.error("feedback", r.id, "counting the open auto issues:", e.message), false));
       input.labelIds = [labels[r.kind], ...(auto ? [labels.auto] : [])];
       const d = await gql(`mutation($input: IssueCreateInput!) { issueCreate(input: $input) { issue { id identifier url } } }`, { input });
       return { ...d.issueCreate.issue, description };
@@ -182,16 +182,16 @@ export function feedback({ dir, env = process.env }) {
 
   // Whether a new issue of `sender`'s may be labelled auto: whether fewer than the caps of the issues so labelled are
   // open, of theirs (by the Sender line) and of every report's (by the title's [FEEDBACK]; one Brian labelled himself
-  // isn't counted).
-  const mayAuto = async (teamId, label, sender) => {
+  // isn't counted). Only this game's project is counted: Nertz files into the same team, with caps of its own.
+  const mayAuto = async (teamId, projectId, label, sender) => {
     if (!caps.perSender || !caps.open) return false;
-    const open = `team: { id: { eq: $team } }, labels: { some: { id: { eq: $label } } }, state: { type: { nin: ["completed", "canceled"] } }`;
+    const open = `team: { id: { eq: $team } }, ${projectId ? "project: { id: { eq: $project } }, " : ""}labels: { some: { id: { eq: $label } } }, state: { type: { nin: ["completed", "canceled"] } }`;
     const had = await gql(
-      `query($team: ID!, $label: ID!, $sender: String!, $theirs: Int!, $all: Int!) {
+      `query($team: ID!, ${projectId ? "$project: ID!, " : ""}$label: ID!, $sender: String!, $theirs: Int!, $all: Int!) {
         theirs: issues(first: $theirs, filter: { ${open}, description: { contains: $sender } }) { nodes { id } }
         all: issues(first: $all, filter: { ${open}, title: { startsWith: "[FEEDBACK]" } }) { nodes { id } }
       }`,
-      { team: teamId, label, sender: `**Sender:** ${sender}`, theirs: caps.perSender, all: caps.open },
+      { team: teamId, ...(projectId ? { project: projectId } : {}), label, sender: `**Sender:** ${sender}`, theirs: caps.perSender, all: caps.open },
     );
     return had.theirs.nodes.length < caps.perSender && had.all.nodes.length < caps.open;
   };
