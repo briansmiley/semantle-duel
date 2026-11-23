@@ -1061,7 +1061,8 @@ function duelPage(id) {
     // which word: Semantle's puzzle (linked), one somebody set, or a random draw, which says only that until
     // the word is out (then, if it was one of Semantle's, its number and link)
     const numbered = v.number && (v.mode !== "random" || v.secret);
-    $(".no").textContent = numbered ? `#${v.number}${v.number === today ? " (today)" : ""}`
+    const solved = numbered && pastDuels().some((d) => d.id !== v.id && d.number === v.number && d.found);
+    $(".no").textContent = numbered ? `#${v.number}${v.number === today ? " (today)" : ""}${solved ? " (played)" : ""}`
       : v.mode === "set" ? (setting ? `you set “${v.secret}”` : `set by ${v.setter?.name ?? "someone"}`) : "a random word";
     if (!numbered) $(".no").removeAttribute("href");
     // semantle.com's archive only has past puzzles; today's is its front page
