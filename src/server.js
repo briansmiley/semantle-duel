@@ -271,7 +271,7 @@ async function handle(req, res) {
     if (duel.setReady(player, !!msg.ready, now)) setTimeout(() => broadcast(room), duel.startsAt - now + 10);
   } else if (action === "rematch") {
     if (!duel.players.has(player)) throw new DuelError("not in this duel");
-    // first one to ask picks the puzzle and the mode (unsaid: as this round); everyone else is pointed at the same duel
+    // first one to ask picks the puzzle, and compete or collab (unsaid: as this round); everyone else is pointed at the same duel
     if (!duel.next) {
       room.rematch ??= createDuel(msg.puzzle, duel.room, { mode: msg.mode, collab: msg.collab ?? duel.collab, avoid: [...(Array.isArray(msg.avoid) ? msg.avoid : []), duel.puzzle.secret] }).then((id) => (duel.next = id)).finally(() => (room.rematch = null));
       await room.rematch;
