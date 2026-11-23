@@ -625,7 +625,7 @@ let currentView = null;  // the duel on screen, if any
     ta.placeholder = k === "bug" ? "What’s wrong?" : "What could be better?";
   };
   for (const b of $("#report h2").children) b.onclick = () => pick(b.dataset.kind);
-  $("#bug").onclick = () => { pick("bug"); said.textContent = ""; d.showModal(); follow(); ta.focus(); };
+  $("#bug").onclick = () => { if (!sending) { pick("bug"); said.textContent = ""; } d.showModal(); follow(); ta.focus(); };
   // iOS doesn't resize the page for the keyboard and can leave it scrolled afterwards, so while open the
   // dialog tracks the visible area; when that's too short for the whole form it becomes just the input.
   const vv = window.visualViewport, slip = $("#report form");
@@ -664,8 +664,7 @@ let currentView = null;  // the duel on screen, if any
   d.addEventListener("paste", (e) => { const f = imageIn(e.clipboardData.files); if (f) { e.preventDefault(); attach(f); } });
   d.addEventListener("dragover", (e) => e.preventDefault());
   d.addEventListener("drop", (e) => { e.preventDefault(); attach(imageIn(e.dataTransfer.files)); });
-  d.addEventListener("cancel", (e) => { if (sending) e.preventDefault(); });  // Escape waits for the send too
-  d.onclick = (e) => { if (e.target === d && !sending) d.close(); };  // tap outside (braces: an onclick returning false would cancel the send)
+  d.onclick = (e) => { if (e.target === d) d.close(); };  // tap outside (braces: an onclick returning false would cancel the send)
   $("#report form").onsubmit = async (e) => {
     e.preventDefault();
     if (!ta.value.trim()) return ta.focus();
