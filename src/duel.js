@@ -240,9 +240,9 @@ export class Duel {
     this.giveUpAsks = [];
   }
 
-  /** The best rank anyone has reached (0 if nobody is in the top 1000). */
-  bestRank() {
-    return Math.max(0, ...[...this.players.values()].flatMap((p) => p.guesses.map((g) => (g.word === this.puzzle.secret ? 0 : g.rank ?? 0))));
+  /** The best rank among those still racing (0 if none is in the top 1000): a hint is for them, so it ignores anyone who has solved or given up. Racers can't hold the secret, since guessing it finishes them (co-op: the whole room). */
+  bestRank(now) {
+    return Math.max(0, ...this.racers(now).flatMap((p) => p.guesses.map((g) => g.rank ?? 0)));
   }
 
   /** Everyone still racing gets this word as a guess; in co-op, the room's one list gets it once. */
