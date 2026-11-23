@@ -132,8 +132,9 @@ function json(res, code, obj) {
 /**
  * A new duel on Semantle's puzzle `which` (today's if not given), or with `mode: "random"` a word drawn from
  * our list (not one in `avoid`), or with `word` one that `setter` chose (they watch; Semantle must know it).
+ * `collab`: the round is played as a room, whichever word it is.
  */
-async function createDuel(which, room = null, { mode, word, setter, avoid } = {}) {
+async function createDuel(which, room = null, { mode, word, setter, avoid, collab } = {}) {
   const today = semantle.todaysNumber();
   let pick;
   if (word !== undefined) {
@@ -151,6 +152,7 @@ async function createDuel(which, room = null, { mode, word, setter, avoid } = {}
   const id = newId();
   const duel = new Duel(id, pick, Date.now());
   if (room) duel.room = room;
+  duel.collab = !!collab;
   if (pick.mode === "set") duel.setter = { id: String(setter?.id ?? ""), name: String(setter?.name ?? "").trim().slice(0, 24) || "someone" };
   rooms.set(id, { duel, listeners: new Set(), scores: new Map(), voice: new Map() });
   await save(duel);
@@ -261,13 +263,17 @@ async function handle(req, res) {
     duel.join(player, msg.name, now);
   } else if (action === "giveup") {
     duel.giveUp(player, now);
+  } else if (action === "askgiveup") {
+    duel.askGiveUp(player, !!msg.want, now);
+  } else if (action === "collab") {
+    duel.setCollab(player, !!msg.collab, now);
   } else if (action === "ready") {
     if (duel.setReady(player, !!msg.ready, now)) setTimeout(() => broadcast(room), duel.startsAt - now + 10);
   } else if (action === "rematch") {
     if (!duel.players.has(player)) throw new DuelError("not in this duel");
-    // first one to ask picks the puzzle; everyone else is pointed at the same duel
+    // first one to ask picks the puzzle and the mode (unsaid: as this round); everyone else is pointed at the same duel
     if (!duel.next) {
-      room.rematch ??= createDuel(msg.puzzle, duel.room, { mode: msg.mode, avoid: [...(Array.isArray(msg.avoid) ? msg.avoid : []), duel.puzzle.secret] }).then((id) => (duel.next = id)).finally(() => (room.rematch = null));
+      room.rematch ??= createDuel(msg.puzzle, duel.room, { mode: msg.mode, collab: msg.collab ?? duel.collab, avoid: [...(Array.isArray(msg.avoid) ? msg.avoid : []), duel.puzzle.secret] }).then((id) => (duel.next = id)).finally(() => (room.rematch = null));
       await room.rematch;
     }
   } else if (action === "hint") {

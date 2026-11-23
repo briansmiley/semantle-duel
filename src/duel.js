@@ -1,6 +1,8 @@
 // A duel: up to eight people racing at the same Semantle puzzle on one clock.
 // Each player finishes on their own (found it, or gave up); finding the word
 // doesn't stop anyone else. The duel is over once everyone has finished.
+// A co-op round (`collab`) is the room working together: one list of words, each still stored with whoever
+// guessed it; finding the word finishes everyone, and giving up takes everyone's vote.
 
 const COUNTDOWN_MS = 3000;
 export const MAX_PLAYERS = 8;
@@ -30,6 +32,8 @@ export class Duel {
     /** @type {Pause[]} */ this.pauses = [];
     /** @type {Record<string, number>} when each player was last heard from */ this.seen = {};
     /** @type {string[]} players asking for a hint; given once everyone still racing has asked */ this.hintAsks = [];
+    /** how this round is played, whatever the word's source (puzzle.mode): racing, or the room together */ this.collab = false;
+    /** @type {string[]} co-op: players asking to give up; the round ends once everyone still racing has asked */ this.giveUpAsks = [];
   }
 
   /** The open pause, if the clock is stopped. */
@@ -149,6 +153,25 @@ export class Duel {
     return true;
   }
 
+  /** Compete or collab, in the lobby. A change un-readies everyone, so nobody starts in a mode they didn't agree to. */
+  setCollab(playerId, collab, now) {
+    if (!this.players.has(playerId)) throw new DuelError("not in this duel");
+    if (this.status(now) !== "lobby") throw new DuelError("already started");
+    if (this.collab === collab) return;
+    this.collab = collab;
+    for (const p of this.players.values()) p.ready = false;
+  }
+
+  /** Every guess in the room, whoever made it. */
+  roomGuesses() {
+    return [...this.players.values()].flatMap((p) => p.guesses);
+  }
+
+  /** The words that count as already guessed for this player: the room's, in co-op. */
+  taken(p) {
+    return this.collab ? this.roomGuesses() : p.guesses;
+  }
+
   /** Why this player can't guess this word right now, or null if they can. */
   refusal(playerId, word, now) {
     const p = this.players.get(playerId);
@@ -156,7 +179,7 @@ export class Duel {
     if (this.status(now) !== "playing" || p.finish) return "not playing";
     if (this.pause()) return "paused";
     if (!/^[a-z][a-z'-]*$/.test(word)) return "not a word";
-    if (p.guesses.some((g) => g.word === word)) return "already guessed";
+    if (this.taken(p).some((g) => g.word === word)) return "already guessed";
     return null;
   }
 
@@ -165,7 +188,7 @@ export class Duel {
     const p = this.players.get(playerId);
     if (!p?.finish) return "not finished";
     if (!/^[a-z][a-z'-]*$/.test(word)) return "not a word";
-    if (p.guesses.some((g) => g.word === word) || p.checks?.some((c) => c.word === word)) return "already guessed";
+    if (this.taken(p).some((g) => g.word === word) || p.checks?.some((c) => c.word === word)) return "already guessed";
     return null;
   }
 
@@ -182,14 +205,39 @@ export class Duel {
     return this.status(now) === "playing" ? [...this.players.values()].filter((p) => !p.finish) : [];
   }
 
+  /** One player's say in a vote of everyone still racing: the asks after it, and whether that's all of them. */
+  vote(asks, playerId, want, now) {
+    const racing = new Set(this.racers(now).map((p) => p.id));
+    const next = asks.filter((id) => id !== playerId && racing.has(id));
+    if (want) next.push(playerId);
+    return [next, racing.size > 0 && [...racing].every((id) => next.includes(id))];
+  }
+
   /** Ask for a hint (or stop asking). Returns true once everyone still racing has asked. */
   askHint(playerId, want, now) {
     if (!this.racing(playerId, now)) throw new DuelError("not playing");
     if (this.pause()) throw new DuelError("paused");
-    const racing = new Set(this.racers(now).map((p) => p.id));
-    this.hintAsks = this.hintAsks.filter((id) => id !== playerId && racing.has(id));
-    if (want) this.hintAsks.push(playerId);
-    return racing.size > 0 && [...racing].every((id) => this.hintAsks.includes(id));
+    const [asks, all] = this.vote(this.hintAsks, playerId, want, now);
+    this.hintAsks = asks;
+    return all;
+  }
+
+  /** Co-op: ask to give up (or stop asking). Once everyone still racing has asked, the round ends for all. */
+  askGiveUp(playerId, want, now) {
+    if (!this.collab) throw new DuelError("not a co-op round");
+    if (!this.racing(playerId, now)) throw new DuelError("not playing");
+    const [asks, all] = this.vote(this.giveUpAsks, playerId, want, now);
+    this.giveUpAsks = asks;
+    if (all) this.finishAll(false, now);
+  }
+
+  /** Co-op: the whole room finishes at this moment. */
+  finishAll(found, now) {
+    for (const p of this.players.values()) p.finish ??= { at: now, found };
+    const open = this.pause();
+    if (open) open.to = now;
+    this.hintAsks = [];
+    this.giveUpAsks = [];
   }
 
   /** The best rank anyone has reached (0 if nobody is in the top 1000). */
@@ -197,8 +245,14 @@ export class Duel {
     return Math.max(0, ...[...this.players.values()].flatMap((p) => p.guesses.map((g) => (g.word === this.puzzle.secret ? 0 : g.rank ?? 0))));
   }
 
-  /** Everyone still racing gets this word as a guess. */
+  /** Everyone still racing gets this word as a guess; in co-op, the room's one list gets it once. */
   giveHint(word, { score, rank }, now) {
+    if (this.collab) {
+      const holder = this.racers(now)[0];  // a hint is nobody's; it has to be stored with someone
+      if (holder && !this.roomGuesses().some((g) => g.word === word)) holder.guesses.push({ n: this.roomGuesses().length + 1, word, score, rank, at: now, hint: true });
+      this.hintAsks = [];
+      return;
+    }
     for (const p of this.racers(now)) {
       if (p.guesses.some((g) => g.word === word)) continue;
       p.guesses.push({ n: p.guesses.length + 1, word, score, rank, at: now, hint: true });
@@ -211,11 +265,14 @@ export class Duel {
     const why = this.refusal(playerId, word, now);
     if (why) throw new DuelError(why);
     const p = this.players.get(playerId);
-    p.guesses.push({ n: p.guesses.length + 1, word, score, rank, at: now });
-    if (word === this.puzzle.secret) p.finish = { at: now, found: true };
+    p.guesses.push({ n: this.taken(p).length + 1, word, score, rank, at: now });
+    if (word !== this.puzzle.secret) return;
+    if (this.collab) this.finishAll(true, now);
+    else p.finish = { at: now, found: true };
   }
 
   giveUp(playerId, now) {
+    if (this.collab) throw new DuelError("the room votes to give up");
     const p = this.players.get(playerId);
     if (!p || p.finish || this.status(now) !== "playing") throw new DuelError("not playing");
     p.finish = { at: now, found: false };
@@ -234,6 +291,7 @@ export class Duel {
       id: this.id,
       number: this.puzzle.number,
       mode: this.puzzle.mode ?? "semantle",
+      collab: this.collab,
       setter: this.setter,
       status,
       now,
@@ -242,6 +300,7 @@ export class Duel {
       elapsed: this.elapsed(ended),  // the clock as of `now`; it runs on from here unless paused or over
       paused: open ? { by: open.by, from: open.from } : null,
       hintAsks: status === "playing" ? this.hintAsks.filter((id) => !this.players.get(id)?.finish) : [],
+      giveUpAsks: status === "playing" ? this.giveUpAsks.filter((id) => !this.players.get(id)?.finish) : [],
       secret: reveal ? this.puzzle.secret : null,
       max: MAX_PLAYERS,
       next: this.next,
@@ -255,7 +314,7 @@ export class Duel {
         guesses: p.guesses.map((g) => ({
           n: g.n,
           // an opponent's word shows once you've guessed it too
-          word: reveal || p.id === viewerId || g.hint || mine.has(g.word) ? g.word : null,
+          word: reveal || this.collab || p.id === viewerId || g.hint || mine.has(g.word) ? g.word : null,
           score: g.score,
           rank: g.rank,
           at: g.at,
@@ -269,7 +328,7 @@ export class Duel {
   }
 
   toJSON() {
-    return { id: this.id, puzzle: this.puzzle, players: [...this.players.values()], startsAt: this.startsAt, createdAt: this.createdAt, next: this.next, room: this.room, setter: this.setter, pauses: this.pauses, seen: this.seen, hintAsks: this.hintAsks };
+    return { id: this.id, puzzle: this.puzzle, players: [...this.players.values()], startsAt: this.startsAt, createdAt: this.createdAt, next: this.next, room: this.room, setter: this.setter, pauses: this.pauses, seen: this.seen, hintAsks: this.hintAsks, collab: this.collab, giveUpAsks: this.giveUpAsks };
   }
 
   static fromJSON(o) {
@@ -282,6 +341,8 @@ export class Duel {
     d.pauses = o.pauses ?? [];
     d.seen = o.seen ?? {};
     d.hintAsks = o.hintAsks ?? [];
+    d.collab = !!o.collab;
+    d.giveUpAsks = o.giveUpAsks ?? [];
     // duels saved before players finished separately: the winner had found it
     if (o.won) {
       const w = d.players.get(o.won.player);
@@ -295,18 +356,23 @@ export class Duel {
 /**
  * A room's record over its finished rounds: each player's wins (found it first) and rounds played,
  * and for each pair who played the same round, who placed higher (finding it beats giving up; a faster
- * find beats a slower one; both giving up counts for neither).
+ * find beats a slower one; both giving up counts for neither). Co-op rounds are in none of that: they only
+ * add to `together`, the words the room has solved as a room.
  * @param {Duel[]} rounds in order
- * @returns {{rounds:number, players:Record<string,{name:string, wins:number, played:number}>, h2h:Record<string,[number,number]>}}
+ * @returns {{rounds:number, together:number, players:Record<string,{name:string, wins:number, played:number}>, h2h:Record<string,[number,number]>}}
  *   h2h is keyed "a|b" with a < b: [a's wins, b's wins]
  */
 export function tally(rounds, now) {
   const players = {}, h2h = {};
-  let n = 0;
+  let n = 0, together = 0;
   for (const d of rounds) {
     if (d.status(now) !== "over") continue;
-    n++;
     const ps = [...d.players.values()];
+    if (d.collab) {
+      if (ps.some((p) => p.finish?.found)) together++;
+      continue;
+    }
+    n++;
     const found = ps.filter((p) => p.finish?.found).sort((a, b) => a.finish.at - b.finish.at);
     for (const p of ps) {
       players[p.id] ??= { name: p.name, wins: 0, played: 0 };
@@ -320,7 +386,7 @@ export function tally(rounds, now) {
       (h2h[`${a.id}|${b.id}`] ??= [0, 0])[place(a) < place(b) ? 0 : 1]++;
     }
   }
-  return { rounds: n, players, h2h };
+  return { rounds: n, together, players, h2h };
 }
 
 export class DuelError extends Error {}
