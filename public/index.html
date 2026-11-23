@@ -219,6 +219,27 @@
   @keyframes grow { from { transform: scaleX(0); } }
   @media (prefers-reduced-motion: reduce) { li.fresh, .chip.fresh, li.landed .s, li.landed .p, li.landed .p .bar i { animation: none; } }
 
+  /* compete or collab, chosen before a round */
+  .modes { display: inline-flex; gap: .9rem; align-items: baseline; }
+  #lobby .modes button, #after .modes button { color: var(--faint); border-bottom: 1.5px solid transparent; padding-bottom: 1px; }
+  #lobby .modes button[aria-pressed="true"], #after .modes button[aria-pressed="true"] { color: var(--ink); border-color: var(--hot); }
+  .modes button:disabled { cursor: default; }
+  /* a co-op round: one board, with a column for who guessed each word */
+  #board.together { grid-template-columns: minmax(0, 38rem); }
+  #board.together li { grid-template-columns: 2em minmax(0, 1fr) 5em 4.6em 8em; }
+  #board.together li .s { grid-column: 4; }
+  #board.together li .p { grid-column: 5; }
+  #board.together li.note .msg { grid-column: 3 / 6; }
+  #board.together .by { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #board.together li:not(.heads) .by { color: var(--faint); font-size: .85em; }
+  .lasts { display: flex; flex-wrap: wrap; gap: .1rem 1rem; color: var(--faint); font-size: .9rem; margin: .1rem 0 .3rem; }
+  .lasts b { font-weight: 400; color: var(--ink); }
+  @media (max-width: 700px) {
+    /* five columns on a phone: the bar goes, so the word keeps its room */
+    #board.together li { grid-template-columns: 1.4em minmax(0, 1fr) 2.9em 3.4em 3.7em; gap: .4em; }
+    #board.together li .p .bar { display: none; }
+  }
+
   /* feedback */
   #top { display: flex; align-items: baseline; padding: .7rem 16px 0; max-width: 980px; margin: 0 auto; }
   #top #bug { margin-left: auto; }
@@ -297,6 +318,7 @@
   <div id="tally" hidden></div>
   <section id="lobby" hidden>
     <div class="who"><span id="mine"><form id="nameform"><input class="line" id="name" placeholder="your name" maxlength="24" autocomplete="off"></form><span class="me"></span><button type="button" class="pencil" title="change your name" aria-label="change your name"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4"/></svg></button><button type="button" class="joinbtn">join</button></span><span class="others"></span></div>
+    <div class="mode"></div>
     <div><button id="go" disabled>ready</button><span class="wait"></span></div>
   </section>
   <div id="rivals" hidden><div class="strip"></div><div class="open"></div></div>
@@ -353,7 +375,7 @@ function remember(v) {
   const entry = {
     id: v.id, room: v.room ?? v.id, number: v.number, mode: v.mode, others, status: v.status,
     found: mine.finish?.found ?? null,
-    place: v.status === "over" && mine.finish?.found ? standings(v).indexOf(mine) + 1 : null,
+    place: v.status === "over" && !v.collab && mine.finish?.found ? standings(v).indexOf(mine) + 1 : null,  // co-op has no places, so no wins
     secret: v.secret, time: mine.finish?.time ?? null,
     at: Date.now(),
   };
@@ -439,9 +461,9 @@ let intoRematch = () => {};
 const VOICE_INTO = "sd-voice-into";  // sessionStorage: "<duel id>|<when>": this tab was in voice, heading into (or reloading) that duel
 
 // Rematch a finished duel on this puzzle; whoever asks first sets it up, and everyone lands in the same one.
-async function rematch(id, puzzle, button, mode) {
+async function rematch(id, puzzle, button, mode, collab) {
   button.disabled = true;
-  const r = await post(`/d/${id}/rematch`, { player: me, puzzle, mode, avoid: mode === "random" ? playedWords() : undefined });
+  const r = await post(`/d/${id}/rematch`, { player: me, puzzle, mode, collab, avoid: mode === "random" ? playedWords() : undefined });
   // the room's link: it opens the rematch
   if (r.view?.next) { intoRematch(r.view.next); location.href = `/d/${r.view.room ?? r.view.next}`; } else button.disabled = false;
 }
@@ -859,6 +881,7 @@ function playedWords() {
 async function archivePage() {
   $("#archive").hidden = false;
   const rematchOf = new URLSearchParams(location.search).get("rematch");
+  const collabNext = new URLSearchParams(location.search).get("collab");  // as chosen on the rematch panel
   $("#archive .for").hidden = !rematchOf;
   const { number: today } = await (await fetch("/today")).json();
   const played = new Set(pastDuels().map((d) => d.number));
@@ -871,7 +894,7 @@ async function archivePage() {
     const b = el("button", { class: played.has(n) ? "played" : "", title: played.has(n) ? "played" : "" },
       el("b", { class: "num" }, `#${n}`),
       el("small", {}, d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })));
-    b.onclick = () => (rematchOf ? rematch(rematchOf, n, b) : newDuel(n, b));
+    b.onclick = () => (rematchOf ? rematch(rematchOf, n, b, undefined, collabNext === null ? undefined : collabNext === "1") : newDuel(n, b));
     months.get(key).push(b);
   }
   $("#archive .months").replaceChildren(...[...months].flatMap(([m, bs]) => [el("h3", {}, m), el("div", { class: "grid" }, ...bs)]));
@@ -895,6 +918,7 @@ function duelPage(id) {
   let recall = null, flashRecall = false;  // a word I'd already guessed: shown up top again, like Semantle does
   let note = null;  // {word, msg}: why my last word didn't count
   let picking = false, today = null;  // rematch: choosing a puzzle
+  let nextCollab = null;  // rematch: compete or collab, if changed from this round's
   let openRival = null;  // on a phone, whose list is open under the strip
   fetch("/today").then((r) => r.json()).then((t) => { today = t.number; if (view) render(); }).catch(() => {});
 
@@ -1055,6 +1079,7 @@ function duelPage(id) {
       const others = v.players.filter((p) => p.id !== me).map((p) => el("span", { class: away(p) ? "away" : "" }, el("span", {}, p.name), tick(p), away(p) ? el("small", {}, " away") : ""));
       if (v.players.length + (mine ? 0 : 1) < v.max) others.push(el("span", { class: "empty" }, "…"));
       $("#lobby .who .others").replaceChildren(...others);
+      $("#lobby .mode").replaceChildren(modeToggle(v.collab, mine && ((collab) => post(`${base}/collab`, { player: me, collab }).then((r) => r.view && apply(r.view)))));
       // everyone says ready, then the countdown starts by itself
       const go = $("#go");
       go.disabled = !mine;
@@ -1072,10 +1097,11 @@ function duelPage(id) {
     const banner = $("#banner");
     banner.hidden = !mine?.finish;
     if (mine?.finish) {
-      const n = mine.guesses.length;
+      const n = v.collab ? v.players.reduce((sum, p) => sum + p.guesses.length, 0) : mine.guesses.length;
+      const finder = v.collab ? v.players.find((p) => p.guesses.some((g) => g.word === v.secret)) : mine;
       banner.replaceChildren(...(mine.finish.found
-        ? ["you found ", el("b", {}, v.secret), " in ", el("span", { class: "num" }, `${n}`), n === 1 ? " guess" : " guesses"]
-        : ["you gave up. it was ", el("b", {}, v.secret)]));
+        ? [`${finder?.id === me ? "you" : finder?.name ?? "the room"} found `, el("b", {}, v.secret), " in ", el("span", { class: "num" }, `${n}`), n === 1 ? " guess" : " guesses"]
+        : [v.collab ? "the room gave up. it was " : "you gave up. it was ", el("b", {}, v.secret)]));
     }
     after(v, mine);
     record(v, mine);
@@ -1088,7 +1114,8 @@ function duelPage(id) {
     // you first; opponents after, by standing once they finish
     const order = standings(v);
     const rank = (p) => (p.id === me ? -1 : p.finish ? order.indexOf(p) : 99);
-    const sides = [...v.players].sort((a, b) => rank(a) - rank(b));
+    const sides = v.collab ? [roomSide(v)] : [...v.players].sort((a, b) => rank(a) - rank(b));
+    board.classList.toggle("together", !!v.collab);
     board.classList.toggle("crowd", sides.length > 2);
     board.classList.toggle("mine", inIt);
     const focused = document.activeElement?.id === "guess";
@@ -1114,25 +1141,29 @@ function duelPage(id) {
       return b;
     };
     const by = v.paused?.by && v.players.find((p) => p.id === v.paused.by);
-    const kids = !v.paused ? (racer ? ["·", toggle("pause", true), " · ", ...hint(v)] : [])
-      : [`· ${!by ? "paused while away" : by.id === me ? "paused" : `${by.name} paused`}`, racer ? toggle("resume", false) : ""];
+    const quit = racer && v.collab ? [" · ", ...giveUpVote(v)] : [];  // (a round can be given up while paused, so the vote stays)
+    const kids = !v.paused ? (racer ? ["·", toggle("pause", true), " · ", ...hint(v), ...quit] : [])
+      : [`· ${!by ? "paused while away" : by.id === me ? "paused" : `${by.name} paused`}`, racer ? toggle("resume", false) : "", ...quit];
     bar.replaceChildren(...kids);
   }
 
   // A hint is given to everyone still racing, once all of them have asked for it.
-  function hint(v) {
-    const asks = v.hintAsks ?? [];
-    const ask = (want, label) => {
-      const b = el("button", { type: "button" }, label);
-      b.onclick = () => post(`${base}/hint`, { player: me, want }).then((r) => { if (r.view) apply(r.view); if (!r.ok && r.error) { note = { word: "hint", msg: r.error }; render(); } });
+  const hint = (v) => vote(v, v.hintAsks ?? [], { action: "hint", label: "hint", asking: "hint asked", wants: "a hint" });
+  // In co-op, so is giving up: it ends the round for the room.
+  const giveUpVote = (v) => vote(v, v.giveUpAsks ?? [], { action: "askgiveup", label: "give up", asking: "asked to give up", wants: "to give up" });
+
+  function vote(v, asks, { action, label, asking, wants }) {
+    const ask = (want, text) => {
+      const b = el("button", { type: "button" }, text);
+      b.onclick = () => post(`${base}/${action}`, { player: me, want }).then((r) => { if (r.view) apply(r.view); if (!r.ok && r.error) { note = { word: label, msg: r.error }; render(); } });
       return b;
     };
     const others = v.players.filter((p) => p.id !== me && !p.finish);
     const asked = others.filter((p) => asks.includes(p.id)).map((p) => p.name);
     const notYet = others.filter((p) => !asks.includes(p.id)).map((p) => p.name);
-    if (asks.includes(me)) return [el("span", {}, `hint asked, waiting for ${notYet.join(", ")}`), ask(false, "cancel")];
-    if (asked.length) return [el("span", { class: "ask" }, `${asked.join(", ")} ${asked.length > 1 ? "want" : "wants"} a hint`), ask(true, "agree")];
-    return [ask(true, "hint")];
+    if (asks.includes(me)) return [el("span", {}, `${asking}, waiting for ${notYet.join(", ")}`), ask(false, "cancel")];
+    if (asked.length) return [el("span", { class: "ask" }, `${asked.join(", ")} ${asked.length > 1 ? "want" : "wants"} ${wants}`), ask(true, "agree")];
+    return [ask(true, label)];
   }
 
   // voice chat, for the duel's players: join, then who's in (lit while talking), mute and leave
@@ -1176,12 +1207,13 @@ function duelPage(id) {
       booked = when;
       fetch(`${base}/tally`).then((r) => r.json()).then((t) => { book = t; if (view) record(view, view.players.find((p) => p.id === me)); }).catch(() => {});
     }
-    box.hidden = !book?.rounds || !(v.status === "lobby" || v.status === "over" || mine?.finish);
+    box.hidden = !(book?.rounds || book?.together) || !(v.status === "lobby" || v.status === "over" || mine?.finish);
     if (box.hidden) return;
     const ps = Object.entries(book.players).sort(([, a], [, b]) => b.wins - a.wins || b.played - a.played);
     const top = ps[0]?.[1].wins;
-    const line1 = el("span", {}, `this room · ${book.rounds} ${book.rounds === 1 ? "round" : "rounds"}: `,
-      ...ps.flatMap(([id, p], i) => [i ? " · " : "", el("span", { class: top && p.wins === top ? "lead" : "" }, el("b", {}, id === me ? "you" : p.name), ` ${p.wins}`)]));
+    const line1 = el("span", {}, book.rounds ? `this room · ${book.rounds} ${book.rounds === 1 ? "round" : "rounds"}: ` : "this room",
+      ...ps.flatMap(([id, p], i) => [i ? " · " : "", el("span", { class: top && p.wins === top ? "lead" : "" }, el("b", {}, id === me ? "you" : p.name), ` ${p.wins}`)]),
+      ...(book.together ? [" · ", el("b", {}, `${book.together}`), " solved together"] : []));
     const vs = ps.filter(([id]) => id !== me).map(([id, p]) => {
       const [k, flip] = me < id ? [`${me}|${id}`, false] : [`${id}|${me}`, true];
       const h = book.h2h[k];
@@ -1208,20 +1240,46 @@ function duelPage(id) {
       b.onclick = () => { picking = true; render(); };
       kids.push(b);
     } else if (mine && v.players.length > 1) {
+      const collab = nextCollab ?? !!v.collab;  // as this round, unless changed
       const go = (label, puzzle) => {
         const b = el("button", { type: "button" }, label);
-        b.onclick = async () => rematch(v.id, await puzzle(), b);
+        b.onclick = async () => rematch(v.id, await puzzle(), b, undefined, collab);
         return b;
       };
-      kids.push(el("span", { class: "pick" },
+      kids.push(modeToggle(collab, (c) => { nextCollab = c; render(); }), el("span", { class: "pick" },
         el("span", {}, "rematch on"),
-        (() => { const b = el("button", { type: "button" }, "a random word"); b.onclick = () => rematch(v.id, undefined, b, "random"); return b; })(),
+        (() => { const b = el("button", { type: "button" }, "a random word"); b.onclick = () => rematch(v.id, undefined, b, "random", collab); return b; })(),
         today && today !== v.number ? go("today’s", async () => today) : "",
-        el("a", { href: `/archive?rematch=${v.id}` }, "the archive"),
+        el("a", { href: `/archive?rematch=${v.id}&collab=${collab ? 1 : 0}` }, "the archive"),
       ));
     }
     kids.push(el("a", { href: "/", class: "quiet" }, "home"));
     nav.replaceChildren(...kids);
+  }
+
+  // Compete or collab. `pick` (a new value) is left out for someone who only gets to see it.
+  function modeToggle(collab, pick) {
+    const opt = (label, value) => {
+      const b = el("button", { type: "button", "aria-pressed": String(!!collab === value) }, label);
+      b.disabled = !pick;
+      if (pick && !!collab !== value) b.onclick = () => pick(value);
+      return b;
+    };
+    return el("span", { class: "modes" }, opt("compete", false), opt("collab", true));
+  }
+
+  // A co-op round is one board, drawn by side() as if it were yours: everyone's guesses in one list, each
+  // knowing who made it (by). Whoever is only watching gets the same board, without the box to type in.
+  function roomSide(v) {
+    const guesses = v.players.flatMap((p) => p.guesses.map((g) => ({ ...g, by: p.id }))).sort((a, b) => a.n - b.n);
+    return { id: me, guesses, checks: v.players.find((p) => p.id === me)?.checks, finish: v.players[0]?.finish ?? null };
+  }
+
+  // Each person's latest word (hints are nobody's).
+  function lastGuesses(v) {
+    const ps = [...v.players].sort((a, b) => (b.id === me) - (a.id === me));
+    return el("div", { class: "lasts" }, ...ps.map((p) =>
+      el("span", {}, el("b", {}, p.id === me ? "you" : p.name), " ", p.guesses.findLast((g) => !g.hint)?.word ?? "–")));
   }
 
   function side(p, v) {
@@ -1232,15 +1290,16 @@ function duelPage(id) {
     const place = f?.found ? standings(v).indexOf(p) + 1 : 0;
     const div = el("div", { class: "side" + (mine ? " me" : "") + (f?.found ? " found" : "") + (place === 1 ? " first" : "") });
     div.append(el("h2", {},
-      el("span", { class: "name" }, mine ? "you" : p.name),
+      el("span", { class: "name" }, v.collab ? "together" : mine ? "you" : p.name),
       el("span", { class: "stat num" },
-        f?.found ? `${ordinal(place)} · ${mmss(f.time)} · ${n}`
+        f?.found ? `${v.collab ? "found" : ordinal(place)} · ${mmss(f.time)} · ${n}`
         : f ? `gave up · ${n}`
         : n ? `${n} · ${best.toFixed(2)}` : ""),
     ));
+    if (v.collab) div.append(lastGuesses(v));
 
     // racing: guess; finished: keep checking words, just for their scores
-    if (mine && (v.status === "playing" || v.status === "over")) {
+    if (mine && v.players.some((q) => q.id === me) && (v.status === "playing" || v.status === "over")) {
       const form = el("form", {});
       const input = el("input", { class: "line", id: "guess", placeholder: f ? "check a word" : "type a guess", autocomplete: "off", autocapitalize: "off", spellcheck: "false", enterkeyhint: "go" });
       input.value = draft;
@@ -1255,7 +1314,7 @@ function duelPage(id) {
       submit.onpointerdown = (e) => e.preventDefault();  // keep the keyboard up on phones
       if (v.paused && !f) { input.disabled = true; submit.disabled = true; }
       if (f) submit.textContent = "check";
-      form.append(input, submit, f ? "" : quit);
+      form.append(input, submit, f || v.collab ? "" : quit);  // (co-op: giving up is a vote, up by the clock)
       form.onsubmit = async (e) => {
         e.preventDefault();
         const word = input.value.trim().toLowerCase();
@@ -1263,7 +1322,7 @@ function duelPage(id) {
         draft = ""; input.value = "";
         note = null; recall = null;
         const mineNow = view.players.find((q) => q.id === me);
-        const known = [...(mineNow?.guesses ?? []), ...(mineNow?.checks ?? [])];
+        const known = [...(view.collab ? view.players.flatMap((q) => q.guesses) : mineNow?.guesses ?? []), ...(mineNow?.checks ?? [])];
         if (known.some((g) => g.word === word)) { recall = word; flashRecall = true; return render(); }
         if (pending.includes(word)) return render();
         pending.push(word); render();
@@ -1307,6 +1366,7 @@ function duelPage(id) {
     if (f && !f.found && v.secret) ol.append(el("li", { class: "missed", "data-key": `${p.id}:missed` }, el("span", { class: "n" }, ""), el("span", { class: "w" }, v.secret), el("span", { class: "s num" }, "100.00"), el("span", { class: "p" }, "😞")));
     for (const g of sorted) ol.append(row(g, p, v, false));
     if (more > 0) ol.append(el("li", { class: "more", "data-key": `${p.id}:more` }, `+${more}`));
+    if (v.collab) ol.querySelector(".heads")?.children[1].after(el("span", { class: "by" }, "Who"));
     div.append(ol);
     return div;
   }
@@ -1372,14 +1432,16 @@ function duelPage(id) {
 
   function row(g, p, v, isLatest, isAgain = false) {
     const key = g.check ? `c${g.k}` : g.n;
-    const fresh = (isLatest || p.guesses.length === 1) && seen !== null && !seen.has(`${p.id}:${key}`);
+    const owner = g.by ?? p.id;  // on a co-op board, whoever guessed this one
+    const fresh = (isLatest || p.guesses.length === 1) && seen !== null && !seen.has(`${owner}:${key}`);
     // yours lands quietly (the score fades in); someone else's gets a highlight
-    const lands = fresh && p.id === me;
+    const lands = fresh && owner === me;
     const li = el("li", { "data-key": `${p.id}:${isLatest ? "latest" : key}`, class: [isLatest && "latest", lands && "landed", fresh && !lands && "fresh", isAgain && "again", g.shared && "shared", g.check && "check", v.secret && g.word === v.secret && "secret"].filter(Boolean).join(" ") });
     const word = g.word ?? "x".repeat(4 + ((g.n * 7 + p.id.charCodeAt(0)) % 6));
     li.append(
       el("span", { class: "n num", title: g.shared ? "guessed by someone else too" : "" }, g.check ? "·" : g.n),
-      el("span", { class: "w" + (g.word ? "" : " hidden") }, word, g.hint ? el("small", {}, "hint") : g.check ? el("small", {}, "after") : ""),
+      el("span", { class: "w" + (g.word ? "" : " hidden") }, word, g.hint && !v.collab ? el("small", {}, "hint") : g.check ? el("small", {}, "after") : ""),
+      ...(v.collab ? [el("span", { class: "by" }, g.hint ? "hint" : g.check ? "" : owner === me ? "you" : v.players.find((q) => q.id === owner)?.name ?? "")] : []),
       el("span", { class: "s num", style: `color:${heat(g)}` }, g.score.toFixed(2)),
       proximity(g),
     );
