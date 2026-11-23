@@ -192,7 +192,7 @@
   li { display: grid; grid-template-columns: 2em minmax(0, 1fr) 4.6em 8em; align-items: center; gap: .6em; padding: .32em 0; border-bottom: 1px solid var(--rule); }
   li.heads { color: var(--faint); border-bottom-color: var(--ink); padding-top: 0; }
   li.heads span { font-size: .75em; }
-  li.heads .sortby { all: unset; cursor: pointer; white-space: nowrap; }
+  li.heads .sortby { all: unset; display: block; cursor: pointer; white-space: nowrap; }  /* the whole cell takes the click, not just a "#" */
   li.heads .sortby:hover, li.heads .sortby.on { color: var(--ink); }
   li.heads .sortby:focus-visible { outline: 1px solid var(--ink); outline-offset: 2px; }
   li.heads .sortby i { font-style: normal; margin-left: .2em; }
@@ -894,8 +894,9 @@ async function openDuel(code) {
 function duelPage(id) {
   $("#duel").hidden = false;
   const base = `/d/${id}`;
-  let view = null, skew = 0, seen = null, sort = { by: "score", flip: false }, draft = "", pending = [];  // pending: my guesses sent but not yet scored
+  let view = null, skew = 0, seen = null, draft = "", pending = [];  // pending: my guesses sent but not yet scored
    // seen: guesses already drawn, so only new ones flash
+  let sort = { by: "score", dir: -1 };  // the lists' order: a column of SORTS, and which way (-1: high to low). Best first to start
   let recall = null, flashRecall = false;  // a word I'd already guessed: shown up top again, like Semantle does
   let note = null;  // {word, msg}: why my last word didn't count
   let picking = false, today = null;  // rematch: choosing a puzzle
@@ -1314,7 +1315,8 @@ function duelPage(id) {
     return div;
   }
 
-  // The list's order, one choice for every list on the page; each column starts in its natural direction.
+  // The list's order, one choice for every list on the page. A column starts in its natural direction
+  // (`first`); picking it again turns it round.
   const SORTS = {
     n: { first: -1, cmp: (a, b) => (a.at - b.at) || ((a.n ?? 1e9) - (b.n ?? 1e9)) },  // checks (n null) sit by time
     word: { first: 1, cmp: (a, b) => (!a.word || !b.word ? (!a.word - !b.word) || ((a.n ?? 1e9) - (b.n ?? 1e9)) : a.word.localeCompare(b.word)) },  // hidden words last, in order
@@ -1322,11 +1324,11 @@ function duelPage(id) {
     rank: { first: -1, cmp: (a, b) => (a.rank ? 1000 + a.rank : a.score) - (b.rank ? 1000 + b.rank : b.score) },
   };
   function sortGuesses(list) {
-    const { first, cmp } = SORTS[sort.by], dir = sort.flip ? -first : first;
-    return [...list].sort((a, b) => dir * cmp(a, b) || b.score - a.score || (a.n ?? 1e9) - (b.n ?? 1e9));
+    const { cmp } = SORTS[sort.by];
+    return [...list].sort((a, b) => sort.dir * cmp(a, b) || b.score - a.score || (a.n ?? 1e9) - (b.n ?? 1e9));
   }
   function pickSort(by) {
-    sort = { by, flip: sort.by === by && !sort.flip };
+    sort = { by, dir: sort.by === by ? -sort.dir : SORTS[by].first };
     render();
   }
 
@@ -1422,11 +1424,11 @@ function heat(g) {
   return "var(--faint)";
 }
 
+// The column names, each a button that sorts by it; an arrow on the one in use (sort: {by, dir}).
 function heads(sort, pick) {
-  const dirs = { n: -1, word: 1, score: -1, rank: -1 };
   const col = (by, label, cls) => {
-    const on = sort.by === by, down = (sort.flip ? -dirs[by] : dirs[by]) < 0;
-    const b = el("button", { type: "button", class: "sortby" + (on ? " on" : ""), "aria-label": `sort by ${label}`, "aria-pressed": on ? "true" : "false" }, label, on ? el("i", {}, down ? "▾" : "▴") : "");
+    const on = sort.by === by;
+    const b = el("button", { type: "button", class: "sortby" + (on ? " on" : ""), "aria-label": `sort by ${label}`, "aria-pressed": on ? "true" : "false" }, label, on ? el("i", {}, sort.dir < 0 ? "▾" : "▴") : "");
     b.onclick = () => pick(by);
     return el("span", cls ? { class: cls } : {}, b);
   };
