@@ -617,14 +617,15 @@ let currentView = null;  // the duel on screen, if any
 
 {
   const d = $("#report"), ta = $("#report textarea"), send = $("#report .send"), said = $("#report .said");
-  let kind = "bug";
+  let kind = "bug", sending = false;
+  const lock = (on) => { sending = on; for (const el of $("#report form").elements) el.disabled = on; };  // while a send is in flight nothing may change
   const pick = (k) => {
     kind = k;
     for (const b of $("#report h2").children) b.setAttribute("aria-pressed", String(b.dataset.kind === k));
     ta.placeholder = k === "bug" ? "What’s wrong?" : "What could be better?";
   };
   for (const b of $("#report h2").children) b.onclick = () => pick(b.dataset.kind);
-  $("#bug").onclick = () => { pick("bug"); said.textContent = ""; send.disabled = false; d.showModal(); follow(); ta.focus(); };
+  $("#bug").onclick = () => { pick("bug"); said.textContent = ""; lock(false); d.showModal(); follow(); ta.focus(); };
   // iOS doesn't resize the page for the keyboard and can leave it scrolled afterwards, so while open the
   // dialog tracks the visible area; when that's too short for the whole form it becomes just the input.
   const vv = window.visualViewport, slip = $("#report form");
@@ -654,7 +655,7 @@ let currentView = null;  // the duel on screen, if any
     return c.toDataURL("image/jpeg", 0.82);
   };
   const attach = async (file) => {
-    if (!file?.type.startsWith("image/")) return;
+    if (sending || !file?.type.startsWith("image/")) return;
     try { setImage(await shrink(file)); } catch { said.textContent = "couldn’t read that picture"; }
   };
   const imageIn = (files) => [...files].find((f) => f.type.startsWith("image/"));
@@ -663,11 +664,12 @@ let currentView = null;  // the duel on screen, if any
   d.addEventListener("paste", (e) => { const f = imageIn(e.clipboardData.files); if (f) { e.preventDefault(); attach(f); } });
   d.addEventListener("dragover", (e) => e.preventDefault());
   d.addEventListener("drop", (e) => { e.preventDefault(); attach(imageIn(e.dataTransfer.files)); });
-  d.onclick = (e) => { if (e.target === d) d.close(); };  // tap outside (braces: an onclick returning false would cancel the send)
+  d.addEventListener("cancel", (e) => { if (sending) e.preventDefault(); });  // Escape waits for the send too
+  d.onclick = (e) => { if (e.target === d && !sending) d.close(); };  // tap outside (braces: an onclick returning false would cancel the send)
   $("#report form").onsubmit = async (e) => {
     e.preventDefault();
     if (!ta.value.trim()) return ta.focus();
-    send.disabled = true; said.textContent = "sending…";
+    lock(true); said.textContent = "sending…";
     const v = currentView;
     const r = await post("/feedback", {
       kind, text: ta.value, player: me, name: store.get("sd-name") ?? "", image,
@@ -678,7 +680,8 @@ let currentView = null;  // the duel on screen, if any
         errors,
       },
     });
-    if (!r.ok) { said.textContent = r.error ?? "didn’t send, try again"; send.disabled = false; return; }
+    sending = false;
+    if (!r.ok) { said.textContent = r.error ?? "didn’t send, try again"; lock(false); ta.focus(); return; }
     said.textContent = "";
     ta.value = "";
     setImage(null);
