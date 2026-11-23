@@ -192,6 +192,10 @@
   li { display: grid; grid-template-columns: 2em minmax(0, 1fr) 4.6em 8em; align-items: center; gap: .6em; padding: .32em 0; border-bottom: 1px solid var(--rule); }
   li.heads { color: var(--faint); border-bottom-color: var(--ink); padding-top: 0; }
   li.heads span { font-size: .75em; }
+  li.heads .sortby { all: unset; cursor: pointer; white-space: nowrap; }
+  li.heads .sortby:hover, li.heads .sortby.on { color: var(--ink); }
+  li.heads .sortby:focus-visible { outline: 1px solid var(--ink); outline-offset: 2px; }
+  li.heads .sortby i { font-style: normal; margin-left: .2em; }
   li.latest { border-bottom: 1.5px solid var(--ink); margin-bottom: .5em; }
   li .n { color: var(--faint); font-size: .8em; }
   li.shared .n { color: var(--ink); font-weight: 600; }  /* someone else guessed it too */
@@ -890,7 +894,7 @@ async function openDuel(code) {
 function duelPage(id) {
   $("#duel").hidden = false;
   const base = `/d/${id}`;
-  let view = null, skew = 0, seen = null, draft = "", pending = [];  // pending: my guesses sent but not yet scored
+  let view = null, skew = 0, seen = null, sort = { by: "score", flip: false }, draft = "", pending = [];  // pending: my guesses sent but not yet scored
    // seen: guesses already drawn, so only new ones flash
   let recall = null, flashRecall = false;  // a word I'd already guessed: shown up top again, like Semantle does
   let note = null;  // {word, msg}: why my last word didn't count
@@ -1290,13 +1294,12 @@ function duelPage(id) {
     const waiting = mine ? pending : [];
     const again = mine && recall ? all.find((g) => g.word === recall) : null;
     const told = mine && note;
-    if (all.length || waiting.length || told) ol.append(heads());
+    if (all.length || waiting.length || told) ol.append(heads(sort, pickSort));
     const last = all.reduce((a, g) => (!a || g.at >= a.at ? g : a), null);
-    let sorted = [...all].sort((a, b) => b.score - a.score);
-    // a crowded table keeps opponents short until the end
+    // a crowded table keeps opponents short until the end: their best by similarity, ordered as chosen
     const cap = !mine && v.players.length > 2 && v.status !== "over" ? 8 : Infinity;
-    const more = sorted.length - cap;
-    sorted = sorted.slice(0, cap);
+    const more = all.length - cap;
+    const sorted = sortGuesses([...all].sort((a, b) => b.score - a.score).slice(0, cap));
     // One row up top, for whatever happened last: a word that didn't count, one being scored, one already
     // guessed, or the latest guess. (A note is newer than anything pending: sending a word clears it.)
     if (told) ol.append(el("li", { class: "note latest", "data-key": `${p.id}:latest` }, el("span", { class: "n" }, ""), el("span", { class: "w" }, note.word), el("span", { class: "msg" }, note.msg)));
@@ -1309,6 +1312,22 @@ function duelPage(id) {
     if (more > 0) ol.append(el("li", { class: "more", "data-key": `${p.id}:more` }, `+${more}`));
     div.append(ol);
     return div;
+  }
+
+  // The list's order, one choice for every list on the page; each column starts in its natural direction.
+  const SORTS = {
+    n: { first: -1, cmp: (a, b) => (a.at - b.at) || ((a.n ?? 1e9) - (b.n ?? 1e9)) },  // checks (n null) sit by time
+    word: { first: 1, cmp: (a, b) => (!a.word || !b.word ? (!a.word - !b.word) || ((a.n ?? 1e9) - (b.n ?? 1e9)) : a.word.localeCompare(b.word)) },  // hidden words last, in order
+    score: { first: -1, cmp: (a, b) => a.score - b.score },
+    rank: { first: -1, cmp: (a, b) => (a.rank ? 1000 + a.rank : a.score) - (b.rank ? 1000 + b.rank : b.score) },
+  };
+  function sortGuesses(list) {
+    const { first, cmp } = SORTS[sort.by], dir = sort.flip ? -first : first;
+    return [...list].sort((a, b) => dir * cmp(a, b) || b.score - a.score || (a.n ?? 1e9) - (b.n ?? 1e9));
+  }
+  function pickSort(by) {
+    sort = { by, flip: sort.by === by && !sort.flip };
+    render();
   }
 
   // Rows move rather than jump: before a redraw, where each row was (by key); after it, each one starts
@@ -1365,7 +1384,7 @@ function duelPage(id) {
     const f = p.finish, last = p.guesses.at(-1), ol = el("ol", {});
     if (last && p.guesses.length > 1) ol.append(row(last, p, v, true));
     if (f && !f.found && v.secret) ol.append(el("li", { class: "missed", "data-key": `${p.id}:missed` }, el("span", { class: "n" }, ""), el("span", { class: "w" }, v.secret), el("span", { class: "s num" }, "100.00"), el("span", { class: "p" }, "😞")));
-    for (const g of [...p.guesses].sort((a, b) => b.score - a.score)) ol.append(row(g, p, v, false));
+    for (const g of sortGuesses(p.guesses)) ol.append(row(g, p, v, false));
     if (!p.guesses.length) ol.append(el("li", { class: "more" }, "no guesses yet"));
     box2.replaceChildren(ol);
   }
@@ -1403,8 +1422,15 @@ function heat(g) {
   return "var(--faint)";
 }
 
-function heads() {
-  return el("li", { class: "heads" }, el("span", {}, "#"), el("span", {}, "Guess"), el("span", { class: "s" }, "Similarity"), el("span", {}, "Proximity"));
+function heads(sort, pick) {
+  const dirs = { n: -1, word: 1, score: -1, rank: -1 };
+  const col = (by, label, cls) => {
+    const on = sort.by === by, down = (sort.flip ? -dirs[by] : dirs[by]) < 0;
+    const b = el("button", { type: "button", class: "sortby" + (on ? " on" : ""), "aria-label": `sort by ${label}`, "aria-pressed": on ? "true" : "false" }, label, on ? el("i", {}, down ? "▾" : "▴") : "");
+    b.onclick = () => pick(by);
+    return el("span", cls ? { class: cls } : {}, b);
+  };
+  return el("li", { class: "heads" }, col("n", "#"), col("word", "Guess"), col("score", "Similarity", "s"), col("rank", "Proximity"));
 }
 
 function ordinal(n) {
