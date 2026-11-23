@@ -427,7 +427,7 @@ async function roomsNow() {
 
 // One line per room you've played in: who, how many rounds, your wins, and how the latest went.
 function pastList(rooms) {
-  rooms = rooms.filter((r) => r.rounds.length && r.others.size);
+  rooms = rooms.filter((r) => r.rounds.length && r.others.size && !isOpen(r));  // an open room is up in "open now" instead
   if (!rooms.length) return null;
   return el("ol", { class: "past" }, ...rooms.map((r) => {
     const d = r.rounds[0], wins = r.rounds.filter((x) => x.place === 1).length, n = r.rounds.length;
@@ -446,20 +446,22 @@ function pastList(rooms) {
 // Your rooms with something on: a lobby with someone there, or a round you're racing that someone has open
 // or has moved in lately (a round left mid-race long ago isn't "open").
 const STALE_MS = 2 * 3600_000;
+function isOpen(r) {
+  const h = r.h;
+  return !!h && ((h.status === "lobby" && h.here > 0) || (h.racing && (h.here > 0 || h.idle < STALE_MS)));
+}
+// Finished rounds, worded as in the history; the round being raced (h.id) isn't one yet.
+function finished(r) {
+  const n = r.rounds.filter((x) => x.id !== r.h.id).length;
+  return n ? `${n} ${n === 1 ? "round" : "rounds"}` : "";
+}
 function openList(rooms) {
-  const seen = new Set();
-  const open = rooms.filter((r) => {
-    const h = r.h;
-    if (!h || seen.has(h.id)) return false;
-    const on = (h.status === "lobby" && h.here > 0) || (h.racing && (h.here > 0 || h.idle < STALE_MS));
-    if (on) seen.add(h.id);
-    return on;
-  });
+  const open = rooms.filter(isOpen);
   if (!open.length) return null;
   return el("div", { class: "open" }, el("h3", {}, "open now"), el("ol", { class: "past" }, ...open.map((r) => el("li", {},
     el("a", { href: `/d/${r.room}` },
       el("span", {}, r.others.size ? `vs ${[...r.others].join(", ")}` : "your room"),
-      el("span", {}, ""),
+      el("span", { class: "num" }, finished(r)),
       el("span", { class: "w" }, r.h.racing ? "you’re mid-race →" : `lobby · ${r.h.here} here →`),
     ),
   ))));
