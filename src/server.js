@@ -71,16 +71,28 @@ async function puzzle(number) {
 // secret; otherwise (or for a word we don't know) ask Semantle per guess.
 const local = vectors.load(process.env.VECTORS_DIR ?? `${DATA}/vectors`);
 const nearby = new Map(); // secret -> Promise<Map word -> rank>
+// secret -> the scores at ranks 1, 500 and 850 of that same list, for the finished round's chart. Every rank
+// (ours or Semantle's per-guess percentile) is a place in this list, so the lines match the proximity column.
+const marks = new Map();
+
+function ranked(secret) {
+  if (!nearby.has(secret)) {
+    if (nearby.size > 50) { nearby.clear(); marks.clear(); }
+    nearby.set(secret, semantle.neighbours(secret).then((list) => {
+      const at = (rank) => list.find((n) => n.rank === rank)?.score ?? null;
+      const m = { r1: at(1), r500: at(500), r850: at(850) };
+      if (Object.values(m).some((x) => x !== null)) marks.set(secret, m);
+      return new Map(list.map((n) => [n.word, n.rank]));
+    }).catch((e) => (nearby.delete(secret), Promise.reject(e))));
+  }
+  return nearby.get(secret);
+}
 
 async function score(word, secret) {
   if (word === secret) return { score: 100, rank: 1000 };
   const v = await local;
   if (v) {
-    if (!nearby.has(secret)) {
-      if (nearby.size > 50) nearby.clear();
-      nearby.set(secret, semantle.nearest(secret).catch((e) => (nearby.delete(secret), Promise.reject(e))));
-    }
-    const [sim, ranks] = await Promise.all([v.similarity(word, secret), nearby.get(secret).catch(() => null)]);
+    const [sim, ranks] = await Promise.all([v.similarity(word, secret), ranked(secret).catch(() => null)]);
     if (sim !== null && ranks) return { score: sim, rank: ranks.get(word) ?? null };
   }
   return semantle.score(word, secret);
@@ -94,7 +106,7 @@ function newId() {
 // here (not saved): it goes out with every view, and the offers, answers and ICE candidates
 // between two of them are passed along the event stream, the sender stamped by us, never read.
 function viewOf(room, player, now) {
-  return { ...room.duel.viewFor(player, now), voice: [...room.voice].map(([id, v]) => ({ id, muted: v.muted })), here: present(room) };
+  return { ...room.duel.viewFor(player, now), thresholds: marks.get(room.duel.puzzle.secret) ?? null, voice: [...room.voice].map(([id, v]) => ({ id, muted: v.muted })), here: present(room) };
 }
 
 /** The players with the page open right now. */
@@ -155,6 +167,7 @@ async function createDuel(which, room = null, { mode, word, setter, avoid, colla
   duel.collab = !!collab;
   if (pick.mode === "set") duel.setter = { id: String(setter?.id ?? ""), name: String(setter?.name ?? "").trim().slice(0, 24) || "someone" };
   rooms.set(id, { duel, listeners: new Set(), scores: new Map(), voice: new Map() });
+  ranked(duel.puzzle.secret).catch(() => {});  // warm: for scoring, and the chart's lines once it's over
   await save(duel);
   return id;
 }
@@ -211,6 +224,9 @@ async function handle(req, res) {
 
   if (req.method === "GET" && action === "events") {
     const player = url.searchParams.get("player") ?? "";
+    // warm the top-1000 for the chart's lines; a finished round waits for it, so its first view has them
+    const warm = ranked(duel.puzzle.secret).catch(() => {});
+    if (duel.status(Date.now()) === "over") await warm;
     res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
     const l = { player, res };
     room.listeners.add(l);

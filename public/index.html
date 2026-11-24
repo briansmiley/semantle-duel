@@ -189,6 +189,33 @@
   #tally { margin: .3rem 0 .6rem; color: var(--faint); font-size: .95rem; display: grid; gap: .15rem; }
   #tally b { font-weight: 400; color: var(--ink); }
   #tally .lead b { color: var(--hot); }
+  #graph { margin: .3rem 0 .8rem; max-width: 40rem; color: var(--faint); font-size: .95rem; }
+  #graph .opts { display: flex; flex-wrap: wrap; align-items: baseline; gap: .2rem 1.4rem; }
+  #graph .key { display: inline-block; width: 22px; margin-right: .3em; }
+  #graph .key svg { display: block; width: 22px; height: 6px; }
+  /* the legend is the way in to choosing whose lines show */
+  #graph .who { position: relative; }
+  #graph .legend { color: inherit; display: inline-flex; flex-wrap: wrap; gap: .1rem .9rem; text-align: left; border-bottom: 1px dotted var(--faint); }
+  #graph .legend:hover { color: var(--ink); }
+  #graph .legend .off { opacity: .4; }
+  #graph .pick { position: absolute; z-index: 5; top: calc(100% + .3rem); left: 0; min-width: 11rem; display: grid; gap: .25rem; padding: .5rem .8rem .6rem; background: var(--paper); color: var(--ink); border: 1px solid var(--rule); box-shadow: 0 6px 24px rgb(0 0 0 / .14); }
+  #graph .pick .all { display: flex; gap: 1rem; color: var(--faint); font-size: .9rem; padding-bottom: .25rem; border-bottom: 1px solid var(--rule); }
+  #graph .pick .all button { border-bottom: 1px dotted currentColor; }
+  #graph .pick .all button:hover { color: var(--ink); }
+  #graph .pick label { display: flex; align-items: center; gap: .4rem; cursor: pointer; }
+  #graph .pick input { margin: 0; accent-color: var(--hot); }
+  #graph .x { text-align: center; }
+  #graph .xlabel { color: var(--faint); border-bottom: 1px dotted var(--faint); }
+  #graph .xlabel:hover { color: var(--ink); }
+  #graph .plot { display: block; width: 100%; height: auto; overflow: visible; margin-top: .4rem; }
+  #graph .plot text { fill: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums; }
+  #graph .plot .rule { stroke: var(--rule); }
+  #graph .plot .zero { stroke: var(--faint); }
+  #graph .plot .brk { stroke: var(--faint); stroke-width: 1.2; }
+  #graph .plot .mark { opacity: .5; }
+  #graph .plot text.mark { font-size: 10px; }
+  #graph path { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  #graph circle { stroke: var(--paper); stroke-width: 1.5; }
 
   ol { list-style: none; margin: .5em 0 0; padding: 0; }
   li { display: grid; grid-template-columns: 2em minmax(0, 1fr) 4.6em 8em; align-items: center; gap: .6em; padding: .32em 0; border-bottom: 1px solid var(--rule); }
@@ -227,8 +254,8 @@
 
   /* compete or collab, chosen before a round */
   .modes { display: inline-flex; gap: .9rem; align-items: baseline; }
-  #lobby .modes button, #after .modes button { color: var(--faint); border-bottom: 1.5px solid transparent; padding-bottom: 1px; }
-  #lobby .modes button[aria-pressed="true"], #after .modes button[aria-pressed="true"] { color: var(--ink); border-color: var(--hot); }
+  #lobby .modes button, #after .modes button, #graph .modes button { color: var(--faint); border-bottom: 1.5px solid transparent; padding-bottom: 1px; }
+  #lobby .modes button[aria-pressed="true"], #after .modes button[aria-pressed="true"], #graph .modes button[aria-pressed="true"] { color: var(--ink); border-color: var(--hot); }
   .modes button:disabled { cursor: default; }
   /* a co-op round: one board, with a column for who guessed each word */
   #board.together { grid-template-columns: minmax(0, 38rem); }
@@ -328,6 +355,7 @@
   <div id="banner" hidden></div>
   <nav id="after" hidden></nav>
   <div id="tally" hidden></div>
+  <div id="graph" hidden></div>
   <section id="lobby" hidden>
     <div class="who"><span id="mine"><form id="nameform"><input class="line" id="name" placeholder="your name" maxlength="24" autocomplete="off"></form><span class="me"></span><button type="button" class="pencil" title="change your name" aria-label="change your name"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4"/></svg></button><button type="button" class="joinbtn">join</button></span><span class="others"></span></div>
     <div class="mode"></div>
@@ -1146,6 +1174,7 @@ function duelPage(id) {
     }
     after(v, mine);
     record(v, mine);
+    graph(v);
     pausebar(v, mine);
     voiceBar(v);
 
@@ -1294,8 +1323,116 @@ function duelPage(id) {
         el("a", { href: `/archive?rematch=${v.id}&collab=${collab ? 1 : 0}` }, "the archive"),
       ));
     }
+    if (v.status === "over" && v.players.some((p) => p.guesses.some((g) => !g.hint))) {
+      const b = el("button", { type: "button", class: "quiet", "aria-expanded": String(chart.open) }, chart.open ? "hide graph" : "graph");
+      b.onclick = () => { chart.open = !chart.open; render(); };
+      kids.push(b);
+    }
     kids.push(el("a", { href: "/", class: "quiet" }, "home"));
     nav.replaceChildren(...kids);
+  }
+
+  // The finished round as a chart: each player's similarity, by guess number or time on the round's clock, raw
+  // or as a rolling average, with faint lines where the proximity column's ranks 1, 500 and 850 fall. Hints are
+  // left out, being nobody's guess. Only once it's over, so it can't show a race still running.
+  let chart = { open: false, x: "t", avg: false, hide: new Set(), picking: false }, chartW = 0;  // hide: unticked in the legend's picker
+  addEventListener("resize", () => { if (view && chart.open && $("#graph").clientWidth !== chartW) graph(view); });
+  // a tap anywhere but the picker or the legend closes the picker (the path, since a tap in it may redraw it)
+  addEventListener("click", (e) => {
+    if (!chart.picking || e.composedPath().some((n) => n.classList?.contains("pick") || n.classList?.contains("legend"))) return;
+    chart.picking = false;
+    graph(view);
+  });
+  function graph(v) {
+    const box = $("#graph");
+    box.hidden = !chart.open || v.status !== "over";
+    if (box.hidden) return;
+    const byTime = chart.x === "t";
+    const series = v.players.map((p, i) => {
+      const gs = p.guesses.filter((g) => !g.hint);
+      const avgs = gs.map((g, k) => {
+        // the word itself, when they found it, ends the line at 100 as it is: it ends the round, it isn't a sample to smooth
+        if (g.rank === 1000) return g.score;
+        const recent = gs.slice(Math.max(0, k - 4), k + 1);  // up to the last five of their own
+        return recent.reduce((sum, h) => sum + h.score, 0) / recent.length;
+      });
+      const points = gs.map((g, k) => [byTime ? g.time : g.n, chart.avg ? avgs[k] : g.score]);
+      // a colour and a dash each, so no two of the eight players look alike, in colour or without it
+      return { p, gs, avgs, points, color: GRAPH_COLORS[i % 4], dash: GRAPH_DASHES[(i + (i >> 2)) % 4] };
+    });
+    // in the proximity bar's own colour at that rank; labelled by nearness, rank 1 being the 1000th closest word
+    const t = v.thresholds;
+    const lines = t ? [[t.r1, 1, "1000th"], [t.r500, 500, "500th"], [t.r850, 850, "150th"]].filter(([y]) => y != null) : [];
+    // the axes fit everyone's scores, raw and averaged, and the lines, so they hold still as the options change. The
+    // found word's 100 would squash the rest under an empty gap, so it gets a band of its own above a break in the axis.
+    const all = [...series.flatMap((s) => [...s.gs.map((g) => g.score), ...s.avgs]), ...lines.map(([y]) => y)], xs = series.flatMap((s) => s.points.map(([x]) => x));
+    const found = all.some((y) => y >= 100), scores = all.filter((y) => y < 100);
+    const yStep = Math.max(...scores, 0) - Math.min(...scores, 0) > 60 ? 25 : 10;
+    const yLo = Math.floor(Math.min(...scores, 0) / yStep) * yStep, yHi = Math.max(yLo + yStep, Math.ceil(Math.max(...scores, 0) / yStep) * yStep);
+    const xLo = byTime ? 0 : 1, xHi = Math.max(xLo + (byTime ? 1000 : 1), ...xs);
+    const xOpts = byTime ? [15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 14400].map((s) => s * 1000) : [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
+    const xStep = xOpts.find((s) => (xHi - xLo) / s <= 5) ?? xOpts.at(-1);
+
+    chartW = box.clientWidth;
+    const W = chartW || 600, H = 200, L = 30, R = 40, T = 8, B = 22, top = found ? T + 22 : T;  // R: a gutter for the lines' labels
+    const sx = (x) => (L + ((x - xLo) / (xHi - xLo)) * (W - L - R)).toFixed(1);
+    const sy = (y) => (y >= 100 && found ? T : top + ((yHi - Math.min(y, yHi)) / (yHi - yLo)) * (H - top - B)).toFixed(1);
+    let marks = "";
+    if (found) {
+      const m = (T + top) / 2;  // a double slash on the axis, between the band and the rest
+      marks += `<line class="rule" x1="${L}" x2="${W - R}" y1="${T}" y2="${T}"/><text x="${L - 5}" y="${T + 4}" text-anchor="end">100</text>`
+        + `<path class="brk" d="M${L - 5} ${m + 2}L${L + 1} ${m - 4}M${L - 1} ${m + 4}L${L + 5} ${m - 2}"/>`;
+    }
+    for (let y = yLo; y <= yHi; y += yStep) marks += `<line class="${y === 0 ? "zero" : "rule"}" x1="${L}" x2="${W - R}" y1="${sy(y)}" y2="${sy(y)}"/><text x="${L - 5}" y="${+sy(y) + 4}" text-anchor="end">${y}</text>`;
+    // the origin goes unmarked, on either axis: the first tick is a step past it
+    for (let x = Math.floor(xLo / xStep) * xStep + xStep; x <= xHi; x += xStep) marks += `<text x="${sx(x)}" y="${H - 5}" text-anchor="middle">${byTime ? mmss(x) : x}</text>`;
+    // labels in the gutter, pushed a line apart where the lines crowd (they're often a point or two apart), then
+    // back up if that ran them off the bottom
+    const tags = lines.map(([y, rank, label]) => ({ y: +sy(y), at: +sy(y), label, c: `hsl(${Math.round((rank / 1000) * 125)} 68% 46%)` }))  // as proximity() colours its bar
+      .sort((a, b) => a.y - b.y);
+    tags.forEach((g, i) => { if (i) g.at = Math.max(g.at, tags[i - 1].at + 11); });
+    for (let i = tags.length - 1; i >= 0; i--) tags[i].at = Math.min(tags[i].at, i < tags.length - 1 ? tags[i + 1].at - 11 : H - B);
+    for (const g of tags) marks += `<line class="mark" x1="${L}" x2="${W - R}" y1="${g.y}" y2="${g.y}" style="stroke:${g.c}"/><text class="mark" x="${W - R + 4}" y="${g.at + 3.5}" style="fill:${g.c}">${g.label}</text>`;
+    for (const s of series) {
+      if (!s.points.length || chart.hide.has(s.p.id)) continue;
+      const [endX, endY] = s.points.at(-1);
+      if (s.points.length > 1) marks += `<path d="M${s.points.map(([x, y]) => `${sx(x)} ${sy(y)}`).join("L")}" style="stroke:var(${s.color})" stroke-dasharray="${s.dash}"/>`;
+      marks += `<circle cx="${sx(endX)}" cy="${sy(endY)}" r="4" style="fill:var(${s.color})"/>`;
+    }
+    const plot = el("div", {});
+    plot.innerHTML = `<svg class="plot" viewBox="0 0 ${W} ${H}" role="img" aria-label="each player's similarity over the round">${marks}</svg>`;  // numbers only: names stay in the legend
+
+    const avg = el("span", { class: "modes" }, ...[[false, "raw"], [true, "5-avg"]].map(([value, label]) => {
+      const b = el("button", { type: "button", "aria-pressed": String(chart.avg === value) }, label);
+      b.onclick = () => { chart.avg = value; graph(view); };
+      return b;
+    }));
+    const swatch = (s) => {
+      const k = el("span", { class: "key" });
+      k.innerHTML = `<svg viewBox="0 0 22 6" aria-hidden="true"><line x1="1" x2="21" y1="3" y2="3" stroke-width="2" stroke-linecap="round" style="stroke:var(${s.color})" stroke-dasharray="${s.dash}"/></svg>`;
+      return k;
+    };
+    const name = (s) => (s.p.id === me ? "you" : s.p.name);
+    const legend = el("button", { type: "button", class: "legend", "aria-expanded": String(chart.picking), title: "choose whose lines show" },
+      ...series.map((s) => el("span", { class: chart.hide.has(s.p.id) || !s.gs.length ? "off" : "" }, swatch(s), name(s))));
+    legend.onclick = () => { chart.picking = !chart.picking; graph(view); };
+    const every = (label, f) => {
+      const b = el("button", { type: "button" }, label);
+      b.onclick = () => { f(); graph(view); };
+      return b;
+    };
+    const pick = !chart.picking ? "" : el("div", { class: "pick" },
+      el("div", { class: "all" }, every("select all", () => chart.hide.clear()), every("select none", () => series.forEach((s) => chart.hide.add(s.p.id)))),
+      ...series.map((s) => {
+        const tick = el("input", { type: "checkbox" });
+        tick.checked = !chart.hide.has(s.p.id);
+        tick.onchange = () => { tick.checked ? chart.hide.delete(s.p.id) : chart.hide.add(s.p.id); graph(view); };
+        return el("label", {}, tick, swatch(s), name(s));
+      }));
+    const xLabel = el("button", { type: "button", class: "xlabel", title: byTime ? "by guess number" : "by time" },
+      byTime ? "time" : v.collab ? "room’s guess #" : "guess #");
+    xLabel.onclick = () => { chart.x = byTime ? "n" : "t"; graph(view); };
+    box.replaceChildren(el("div", { class: "opts" }, avg, el("span", { class: "who" }, legend, pick)), plot.firstChild, el("div", { class: "x" }, xLabel));
   }
 
   // Compete or collab. `pick` (a new value) is left out for someone who only gets to see it.
@@ -1506,6 +1643,9 @@ function duelPage(id) {
     return li;
   }
 }
+
+// One per player in the finished round's chart (see graph), by their place in the room.
+const GRAPH_COLORS = ["--hot", "--cool", "--ink", "--warm"], GRAPH_DASHES = ["", "7 4", "1 4", "9 4 1 4"];
 
 // A guess's word. One you may not see yet is a run of x's to blur, the same length each time it's drawn.
 function wordOf(g, p, ...kids) {
