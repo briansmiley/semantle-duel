@@ -146,7 +146,7 @@
     #board, #board.crowd { grid-template-columns: minmax(0, 1fr); gap: 2rem; margin-top: 1.2rem; }
     #board.mine .side:not(.me), #board.mine .others { display: none; }
     /* narrower columns, so the word itself has room */
-    #duel li { grid-template-columns: 1.6em minmax(0, 1fr) 3.6em 6.6em; gap: .5em; }
+    #duel li { grid-template-columns: 1.6em minmax(0, 1fr) 3em 6.6em; gap: .5em; }
     /* everyone else in one strip, a line high however many: leader first, sideways if it overflows */
     #rivals:not([hidden]) { display: block; margin: .9rem 0 0; }
     #rivals .strip { display: flex; gap: 1.2rem; overflow-x: auto; scrollbar-width: none; white-space: nowrap; padding: .2rem 0 .4rem; border-bottom: 1px solid var(--rule); }
@@ -218,9 +218,11 @@
   #graph circle { stroke: var(--paper); stroke-width: 1.5; }
 
   ol { list-style: none; margin: .5em 0 0; padding: 0; }
-  li { display: grid; grid-template-columns: 2em minmax(0, 1fr) 3.6em 8em; align-items: center; gap: .6em; padding: .32em 0; border-bottom: 1px solid var(--rule); }
+  li { display: grid; grid-template-columns: 2em minmax(0, 1fr) 3em 8em; align-items: center; gap: .6em; padding: .32em 0; border-bottom: 1px solid var(--rule); }
   li.heads { color: var(--faint); border-bottom-color: var(--ink); padding-top: 0; }
   li.heads span { font-size: .75em; }
+  /* the score column is as wide as a score; its heading runs on to the left, over the Guess column's empty end */
+  li.heads .s { justify-self: end; white-space: nowrap; }
   li.heads .sortby { all: unset; display: block; cursor: pointer; white-space: nowrap; }  /* the whole cell takes the click, not just a "#" */
   li.heads .sortby:hover, li.heads .sortby.on { color: var(--ink); }
   li.heads .sortby:focus-visible { outline: 1px solid var(--ink); outline-offset: 2px; }
@@ -236,9 +238,10 @@
   /* with a tag (hint, after): the word takes the ellipsis, not the tag */
   li .w:has(small) { display: flex; align-items: baseline; }
   li .w .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  /* when even that's short, the tag gives way before the word: it snaps to its first letter ("h") as soon as it
-     can't fit whole, the rest wrapping onto a line that's hidden */
-  li .w:has(small) small { flex-shrink: 1000; min-width: .8em; display: inline-flex; flex-wrap: wrap; max-height: 1.3em; overflow: hidden; }
+  /* the word takes its full width first; the tag has what's left, and once that's less than the whole tag it snaps to
+     its first letter ("h"), the rest wrapping onto a line that's hidden. Only then is the word cut. */
+  li .w:has(small) .t { flex: 0 1 auto; }
+  li .w:has(small) small { flex: 1 1 0; min-width: .8em; display: inline-flex; flex-wrap: wrap; max-height: 1.3em; overflow: hidden; }
   li .w.hidden, .chip .w.hidden { filter: blur(5px); user-select: none; color: var(--faint); }
   li .s { text-align: right; }
   li .p { font-size: .85em; white-space: nowrap; }
