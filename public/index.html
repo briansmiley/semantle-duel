@@ -155,9 +155,8 @@
     .chip.on { border-color: var(--ink); }
     .chip .name { font-size: 1.05rem; }
     .chip.first .name { color: var(--hot); }
-    .chip .s { font-size: .9rem; }
+    .chip .s, .chip .w { font-size: .9rem; }
     .chip .mark, .chip .p { font-size: .78rem; color: var(--faint); }
-    .chip .w { font-size: .9rem; }
     .chip .p .bar { display: none; }
     .chip.found .mark { color: var(--hot); }
     #rivals .open ol { font-size: .92em; margin: .2em 0 0; }
@@ -1449,7 +1448,8 @@ function duelPage(id) {
     }
   }
 
-  // phone: everyone else in one strip (finished by place, then by best score); tap a name for their list
+  // phone: everyone else in one strip (finished by place, then by best score), each still racing with their
+  // best guess; tap a name for their list
   function strip(v, others, inIt) {
     const box = $("#rivals");
     box.hidden = !inIt || !others.length;
@@ -1470,7 +1470,7 @@ function duelPage(id) {
         f?.found ? el("span", { class: "mark num" }, `${ordinal(place)} · ${mmss(f.time)}`)
         : f ? el("span", { class: "mark" }, "gave up")
         : el("span", { class: "s num", style: b ? `color:${heat(b)}` : "" }, b ? b.score.toFixed(2) : "–"),
-        ...(!f && b ? [el("span", { class: "w" + (b.word ? "" : " hidden") }, b.word ?? "x".repeat(4 + ((b.n * 7 + p.id.charCodeAt(0)) % 6))), proximity(b)] : []),
+        ...(!f && b ? [wordOf(b, p), proximity(b)] : []),
       );
       chip.onclick = () => { openRival = openRival === p.id ? null : p.id; render(); };
       return chip;
@@ -1493,16 +1493,20 @@ function duelPage(id) {
     // yours lands quietly (the score fades in); someone else's gets a highlight
     const lands = fresh && owner === me;
     const li = el("li", { "data-key": `${p.id}:${isLatest ? "latest" : key}`, class: [isLatest && "latest", lands && "landed", fresh && !lands && "fresh", isAgain && "again", g.shared && "shared", g.check && "check", v.secret && g.word === v.secret && "secret"].filter(Boolean).join(" ") });
-    const word = g.word ?? "x".repeat(4 + ((g.n * 7 + p.id.charCodeAt(0)) % 6));
     li.append(
       el("span", { class: "n num", title: g.shared ? "guessed by someone else too" : "" }, g.check ? "·" : g.n),
-      el("span", { class: "w" + (g.word ? "" : " hidden") }, word, g.hint && !v.collab ? el("small", {}, "hint") : g.check ? el("small", {}, "after") : ""),
+      wordOf(g, p, g.hint && !v.collab ? el("small", {}, "hint") : g.check ? el("small", {}, "after") : ""),
       ...(v.collab ? [el("span", { class: "by" }, g.hint ? "hint" : g.check ? "" : owner === me ? "you" : v.players.find((q) => q.id === owner)?.name ?? "")] : []),
       el("span", { class: "s num", style: `color:${heat(g)}` }, g.score.toFixed(2)),
       proximity(g),
     );
     return li;
   }
+}
+
+// A guess's word. One you may not see yet is a run of x's to blur, the same length each time it's drawn.
+function wordOf(g, p, ...kids) {
+  return el("span", { class: "w" + (g.word ? "" : " hidden") }, g.word ?? "x".repeat(4 + ((g.n * 7 + p.id.charCodeAt(0)) % 6)), ...kids);
 }
 
 // Semantle's proximity column: rank out of 1000 with a bar, or a temperature word.
