@@ -74,6 +74,7 @@
   #home .open .past { margin-top: 0; }
   #home .past a { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: .8rem; padding: .35rem 0; color: var(--faint); text-decoration: none; border-bottom: 1px solid var(--rule); }
   #home .past a:hover { color: var(--ink); }
+  #home .past small { margin-left: .5rem; font-size: .75rem; opacity: .75; white-space: nowrap; }
   #home .past .w { color: var(--hot); }
 
   /* duel */
@@ -386,6 +387,7 @@ function remember(v) {
     found: mine.finish?.found ?? null,
     place: v.status === "over" && !v.collab && mine.finish?.found ? standings(v).indexOf(mine) + 1 : null,  // co-op has no places, so no wins
     secret: v.secret, time: mine.finish?.time ?? null,
+    start: v.startsAt,  // when the round began (at is just when this page last saw it)
     at: Date.now(),
   };
   const list = [entry, ...pastDuels().filter((d) => d.id !== v.id)].slice(0, 200);
@@ -425,15 +427,23 @@ async function roomsNow() {
   return [...merged.values()].sort((a, b) => b.at - a.at);
 }
 
-// One line per room you've played in: who, how many rounds, your wins, and how the latest went.
+// When a room started: the time if that was today, else a short date.
+function startedAt(ms) {
+  const t = new Date(ms);
+  return t.toDateString() === new Date().toDateString()
+    ? t.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    : t.toLocaleDateString([], { month: "short", day: "numeric", ...(t.getFullYear() === new Date().getFullYear() ? {} : { year: "numeric" }) });
+}
+
+// One line per room you've played in: who, when it started, how many rounds, your wins, and how the latest went.
 function pastList(rooms) {
   rooms = rooms.filter((r) => r.rounds.length && r.others.size);
   if (!rooms.length) return null;
   return el("ol", { class: "past" }, ...rooms.map((r) => {
-    const d = r.rounds[0], wins = r.rounds.filter((x) => x.place === 1).length, n = r.rounds.length;
+    const d = r.rounds[0], started = Math.min(...r.rounds.map((x) => x.start ?? x.at)), wins = r.rounds.filter((x) => x.place === 1).length, n = r.rounds.length;
     return el("li", {},
       el("a", { href: `/d/${r.room}` },
-        el("span", {}, `vs ${[...r.others].join(", ")}`),
+        el("span", {}, `vs ${[...r.others].join(", ")}`, el("small", {}, startedAt(started))),
         el("span", { class: "num" }, `${n} ${n === 1 ? "round" : "rounds"}${wins ? ` · ${wins} won` : ""}`),
         el("span", { class: d.place === 1 ? "w" : "" },
           d.found === true ? `${d.place ? ordinal(d.place) : "found"} · ${d.secret}`
@@ -458,7 +468,8 @@ function openList(rooms) {
   if (!open.length) return null;
   return el("div", { class: "open" }, el("h3", {}, "open now"), el("ol", { class: "past" }, ...open.map((r) => el("li", {},
     el("a", { href: `/d/${r.room}` },
-      el("span", {}, r.others.size ? `vs ${[...r.others].join(", ")}` : "your room"),
+      el("span", {}, r.others.size ? `vs ${[...r.others].join(", ")}` : "your room",
+        ...(r.rounds.length ? [el("small", {}, startedAt(Math.min(...r.rounds.map((x) => x.start ?? x.at))))] : [])),
       el("span", {}, ""),
       el("span", { class: "w" }, r.h.racing ? "you’re mid-race →" : `lobby · ${r.h.here} here →`),
     ),
@@ -616,15 +627,16 @@ addEventListener("unhandledrejection", (e) => errors.push(`unhandled: ${e.reason
 let currentView = null;  // the duel on screen, if any
 
 {
-  const d = $("#report"), ta = $("#report textarea"), send = $("#report .send"), said = $("#report .said");
-  let kind = "idea";
+  const d = $("#report"), ta = $("#report textarea"), said = $("#report .said");
+  let kind = "idea", sending = false;
+  const lock = (on) => { sending = on; for (const el of $("#report form").elements) el.disabled = on; };  // while a send is in flight nothing may change
   const pick = (k) => {
     kind = k;
     for (const b of $("#report h2").children) b.setAttribute("aria-pressed", String(b.dataset.kind === k));
     ta.placeholder = k === "bug" ? "What’s wrong?" : "What could be better?";
   };
   for (const b of $("#report h2").children) b.onclick = () => pick(b.dataset.kind);
-  $("#bug").onclick = () => { pick("idea"); said.textContent = ""; send.disabled = false; d.showModal(); follow(); ta.focus(); };
+  $("#bug").onclick = () => { if (!sending) { pick("idea"); said.textContent = ""; } d.showModal(); follow(); ta.focus(); };
   // iOS doesn't resize the page for the keyboard and can leave it scrolled afterwards, so while open the
   // dialog tracks the visible area; when that's too short for the whole form it becomes just the input.
   const vv = window.visualViewport, slip = $("#report form");
@@ -654,7 +666,7 @@ let currentView = null;  // the duel on screen, if any
     return c.toDataURL("image/jpeg", 0.82);
   };
   const attach = async (file) => {
-    if (!file?.type.startsWith("image/")) return;
+    if (sending || !file?.type.startsWith("image/")) return;
     try { setImage(await shrink(file)); } catch { said.textContent = "couldn’t read that picture"; }
   };
   const imageIn = (files) => [...files].find((f) => f.type.startsWith("image/"));
@@ -667,7 +679,7 @@ let currentView = null;  // the duel on screen, if any
   $("#report form").onsubmit = async (e) => {
     e.preventDefault();
     if (!ta.value.trim()) return ta.focus();
-    send.disabled = true; said.textContent = "sending…";
+    lock(true); said.textContent = "sending…";
     const v = currentView;
     const r = await post("/feedback", {
       kind, text: ta.value, player: me, name: store.get("sd-name") ?? "", image,
@@ -678,7 +690,8 @@ let currentView = null;  // the duel on screen, if any
         errors,
       },
     });
-    if (!r.ok) { said.textContent = r.error ?? "didn’t send, try again"; send.disabled = false; return; }
+    lock(false);
+    if (!r.ok) { said.textContent = r.error ?? "didn’t send, try again"; ta.focus(); return; }
     said.textContent = "";
     ta.value = "";
     setImage(null);
