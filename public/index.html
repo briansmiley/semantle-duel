@@ -1351,6 +1351,8 @@ function duelPage(id) {
     const series = v.players.map((p, i) => {
       const gs = p.guesses.filter((g) => !g.hint);
       const avgs = gs.map((g, k) => {
+        // the word itself, when they found it, ends the line at 100 as it is: it ends the round, it isn't a sample to smooth
+        if (g.rank === 1000) return g.score;
         const recent = gs.slice(Math.max(0, k - 4), k + 1);  // up to the last five of their own
         return recent.reduce((sum, h) => sum + h.score, 0) / recent.length;
       });
