@@ -237,7 +237,7 @@
   li .w { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* with a tag (hint, after): the word takes the ellipsis, not the tag */
   li .w:has(small) { display: flex; align-items: baseline; }
-  li .w .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  li .w .t { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; }  /* a box with or without a tag, so cutOf can measure it */
   /* the word takes its full width first; the tag has what's left, and once that's less than the whole tag it snaps to
      its first letter ("h"), the rest wrapping onto a line that's hidden. Only then is the word cut. */
   li .w:has(small) .t { flex: 0 1 auto; }
@@ -1670,10 +1670,11 @@ function cutOf(target) {
   return e && e.scrollWidth > e.clientWidth ? { e, text: e.textContent } : null;
 }
 // Hover shows it as a title; a tap (which shows no title) floats it near the word until the next tap, scroll or 2s.
+// The tap is a pointerup, not a click: an iPhone sends no click for a tap on plain text.
 let cutTip, cutTimer;
 function hideCut() { cutTip?.remove(); cutTip = null; clearTimeout(cutTimer); }
 addEventListener("pointerover", (e) => { const c = cutOf(e.target), cell = e.target.closest?.("li .w, li .by"); if (cell) cell.title = c?.text ?? ""; });
-addEventListener("click", (e) => {
+addEventListener("pointerup", (e) => {
   const c = cutOf(e.target), same = c && cutTip?.cutEl === c.e;
   hideCut();
   if (!c || same) return;
