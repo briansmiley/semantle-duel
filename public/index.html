@@ -156,7 +156,9 @@
     .chip .name { font-size: 1.05rem; }
     .chip.first .name { color: var(--hot); }
     .chip .s { font-size: .9rem; }
-    .chip .mark { font-size: .78rem; color: var(--faint); }
+    .chip .mark, .chip .p { font-size: .78rem; color: var(--faint); }
+    .chip .w { font-size: .9rem; }
+    .chip .p .bar { display: none; }
     .chip.found .mark { color: var(--hot); }
     #rivals .open ol { font-size: .92em; margin: .2em 0 0; }
     #rivals .open:not(:empty) { border-bottom: 1px solid var(--rule); }
@@ -205,7 +207,7 @@
   /* a guess being scored: your word as you typed it, in full ink; only the score waits */
   li.pending .s { color: var(--faint); }
   li .w { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  li .w.hidden { filter: blur(5px); user-select: none; color: var(--faint); }
+  li .w.hidden, .chip .w.hidden { filter: blur(5px); user-select: none; color: var(--faint); }
   li .s { text-align: right; }
   li .p { font-size: .85em; white-space: nowrap; }
   li .p.num { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: .4em; }
@@ -1468,6 +1470,7 @@ function duelPage(id) {
         f?.found ? el("span", { class: "mark num" }, `${ordinal(place)} · ${mmss(f.time)}`)
         : f ? el("span", { class: "mark" }, "gave up")
         : el("span", { class: "s num", style: b ? `color:${heat(b)}` : "" }, b ? b.score.toFixed(2) : "–"),
+        ...(!f && b ? [el("span", { class: "w" + (b.word ? "" : " hidden") }, b.word ?? "x".repeat(4 + ((b.n * 7 + p.id.charCodeAt(0)) % 6))), proximity(b)] : []),
       );
       chip.onclick = () => { openRival = openRival === p.id ? null : p.id; render(); };
       return chip;
