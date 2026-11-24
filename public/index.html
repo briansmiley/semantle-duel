@@ -237,6 +237,7 @@
   #board.together li.note .msg { grid-column: 3 / 6; }
   #board.together .by { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #board.together li:not(.heads) .by { color: var(--faint); font-size: .85em; }
+  #board.together li:not(.heads) .by.hint { color: var(--hot); font-style: italic; }  /* as the hint badge on a duel board */
   .lasts { display: flex; flex-wrap: wrap; gap: .1rem 1rem; color: var(--faint); font-size: .9rem; margin: .1rem 0 .3rem; }
   .lasts b { font-weight: 400; color: var(--ink); }
   @media (max-width: 700px) {
@@ -1494,7 +1495,7 @@ function duelPage(id) {
     li.append(
       el("span", { class: "n num", title: g.shared ? "guessed by someone else too" : "" }, g.check ? "·" : g.n),
       el("span", { class: "w" + (g.word ? "" : " hidden") }, word, g.hint && !v.collab ? el("small", {}, "hint") : g.check ? el("small", {}, "after") : ""),
-      ...(v.collab ? [el("span", { class: "by" }, g.hint ? "hint" : g.check ? "" : owner === me ? "you" : v.players.find((q) => q.id === owner)?.name ?? "")] : []),
+      ...(v.collab ? [el("span", { class: g.hint ? "by hint" : "by" }, g.hint ? "hint" : g.check ? "" : owner === me ? "you" : v.players.find((q) => q.id === owner)?.name ?? "")] : []),
       el("span", { class: "s num", style: `color:${heat(g)}` }, g.score.toFixed(2)),
       proximity(g),
     );
