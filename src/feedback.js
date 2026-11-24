@@ -9,9 +9,7 @@
 //   LINEAR_PROJECT (by name, default "Semantle Duel") if it exists, labelled Bug or Feature and `auto` (each made
 //   if the team has none of that name); the screenshot goes up to Linear's storage and into the description. It's
 //   assigned to LINEAR_ASSIGNEE (an email) if set, else to the API key's owner. `auto` hands the issue to the
-//   auto-fanout, which implements it, and each one it takes up costs a Claude run: so only so many issues labelled
-//   so may be open at once (not Done or Canceled), of one sender's (AUTO_PER_SENDER, default 5) and of everyone's
-//   (AUTO_OPEN, default 20), as Linear says when the issue is filed. Past either, the issue is filed without it.
+//   auto-fanout, which implements it and decides how many it takes on at once (of everyone's, and of one sender's).
 //   A sender is the player id, written on the issue hashed (`**Sender:**`).
 // - ANTHROPIC_API_KEY (optional, alongside either): Claude Haiku titles each report and judges how much it matters
 //   (the issue's priority; never Urgent, since it's a player's word). Without it, or if that fails, a report is
@@ -41,9 +39,8 @@ const clip = (s, max) => {
 };
 /** What a player sent for one line of the issue (a name, a page): any break or run of blanks in it is one space. */
 const line = (v, max) => String(v ?? "").replace(/[\s\u0085]+/g, " ").slice(0, max);
-/** Who sent a report, as the caps count them: their player id, hashed (the issue says it, and must not give the id). */
+/** Who sent a report, as the auto-fanout counts them: their player id, hashed (the issue says it, and must not give the id). */
 const senderKey = (player) => createHash("sha256").update(player ? `player:${player}` : "nobody").digest("hex").slice(0, 16);
-const cap = (v, otherwise) => (/^\d+$/.test(v ?? "") ? Number(v) : otherwise);
 
 const HEADING_SCHEMA = { type: "object", properties: { title: { type: "string" }, priority: { type: "integer", enum: [2, 3, 4] } }, required: ["title", "priority"], additionalProperties: false };
 
@@ -57,13 +54,6 @@ export function feedback({ dir, env = process.env }) {
   const webhook = env.FEEDBACK_WEBHOOK || null;
   const linear = env.LINEAR_API_KEY ? { key: env.LINEAR_API_KEY, team: env.LINEAR_TEAM || "SMI", project: env.LINEAR_PROJECT || "Semantle Duel", assignee: env.LINEAR_ASSIGNEE || null } : null;
   const claude = env.ANTHROPIC_API_KEY ? new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, timeout: PATIENCE_MS, maxRetries: 0 }) : null;
-  const caps = { perSender: cap(env.AUTO_PER_SENDER, 5), open: cap(env.AUTO_OPEN, 20) };
-  let filing = Promise.resolve(); // issues are counted and filed one at a time: two at once must not both take the last place
-  const inTurn = (does) => {
-    const done = filing.then(does, does);
-    filing = done.catch(() => {});
-    return done;
-  };
   const ready = mkdir(dir, { recursive: true });
   let kept = ready.then(async () => {  // bytes of screenshots on the volume so far
     let n = 0;
@@ -172,28 +162,9 @@ export function feedback({ dir, env = process.env }) {
     if (priority) input.priority = priority;
     if (projectId) input.projectId = projectId;
     if (assigneeId) input.assigneeId = assigneeId;
-    return inTurn(async () => {
-      const auto = await mayAuto(teamId, projectId, labels.auto, sender).catch((e) => (console.error("feedback", r.id, "counting the open auto issues:", e.message), false));
-      input.labelIds = [labels[r.kind], ...(auto ? [labels.auto] : [])];
-      const d = await gql(`mutation($input: IssueCreateInput!) { issueCreate(input: $input) { issue { id identifier url } } }`, { input });
-      return { ...d.issueCreate.issue, description };
-    });
-  };
-
-  // Whether a new issue of `sender`'s may be labelled auto: whether fewer than the caps of the issues so labelled are
-  // open, of theirs (by the Sender line) and of every report's (by the title's [FEEDBACK]; one Brian labelled himself
-  // isn't counted). Only this game's project is counted: Nertz files into the same team, with caps of its own.
-  const mayAuto = async (teamId, projectId, label, sender) => {
-    if (!caps.perSender || !caps.open) return false;
-    const open = `team: { id: { eq: $team } }, ${projectId ? "project: { id: { eq: $project } }, " : ""}labels: { some: { id: { eq: $label } } }, state: { type: { nin: ["completed", "canceled"] } }`;
-    const had = await gql(
-      `query($team: ID!, ${projectId ? "$project: ID!, " : ""}$label: ID!, $sender: String!, $theirs: Int!, $all: Int!) {
-        theirs: issues(first: $theirs, filter: { ${open}, description: { contains: $sender } }) { nodes { id } }
-        all: issues(first: $all, filter: { ${open}, title: { startsWith: "[FEEDBACK]" } }) { nodes { id } }
-      }`,
-      { team: teamId, ...(projectId ? { project: projectId } : {}), label, sender: `**Sender:** ${sender}`, theirs: caps.perSender, all: caps.open },
-    );
-    return had.theirs.nodes.length < caps.perSender && had.all.nodes.length < caps.open;
+    input.labelIds = [labels[r.kind], labels.auto];
+    const d = await gql(`mutation($input: IssueCreateInput!) { issueCreate(input: $input) { issue { id identifier url } } }`, { input });
+    return { ...d.issueCreate.issue, description };
   };
 
   // The post's id is only known once it's made, after the issue (so that the post can link it): the description is
