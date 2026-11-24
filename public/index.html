@@ -519,12 +519,12 @@ function openList(rooms) {
 
 const VOICE_INTO = "sd-voice-into";  // sessionStorage: "<duel id>|<when>": this tab was in voice, heading into (or reloading) that duel
 
-// Propose a rematch of a finished duel on this puzzle; whoever asks first sets it up, and the others are asked
-// to accept it. Nobody is moved off the finished round: returns its view, with the rematch in it.
+// Propose a rematch of a finished duel on this puzzle; whoever asks first sets it, and it's made once every player
+// has said yes. Nobody is moved off the finished round: returns its view, with the proposal in it.
 async function rematch(id, puzzle, button, mode, collab) {
   button.disabled = true;
   const r = await post(`/d/${id}/rematch`, { player: me, puzzle, mode, collab, avoid: mode === "random" ? playedWords() : undefined });
-  if (!r.view?.next) button.disabled = false;
+  if (!r.view) button.disabled = false;
   return r.view;
 }
 
@@ -969,8 +969,8 @@ async function archivePage() {
     const b = el("button", { class: played.has(n) ? "played" : "", title: played.has(n) ? "played" : "" },
       el("b", { class: "num" }, `#${n}`),
       el("small", {}, d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })));
-    // a rematch: back to the finished round (just that one: the room's link would open the rematch)
-    b.onclick = () => (rematchOf ? rematch(rematchOf, n, b, undefined, collabNext === null ? undefined : collabNext === "1").then((v) => v?.next && (location.href = `/d/${rematchOf}?round`)) : newDuel(n, b));
+    // a rematch proposed: back to the finished round to wait for the others (just that one, should it already be made)
+    b.onclick = () => (rematchOf ? rematch(rematchOf, n, b, undefined, collabNext === null ? undefined : collabNext === "1").then((v) => v && (location.href = `/d/${rematchOf}?round`)) : newDuel(n, b));
     months.get(key).push(b);
   }
   $("#archive .months").replaceChildren(...[...months].flatMap(([m, bs]) => [el("h3", {}, m), el("div", { class: "grid" }, ...bs)]));
@@ -1230,13 +1230,13 @@ function duelPage(id) {
   // In co-op, so is giving up: it ends the round for the room.
   const giveUpVote = (v) => vote(v, v.giveUpAsks ?? [], { action: "askgiveup", label: "give up", asking: "asked to give up", wants: "to give up" });
 
-  function vote(v, asks, { action, label, asking, wants }) {
+  function vote(v, asks, { action, label, asking, wants, voters = v.players.filter((p) => !p.finish) }) {
     const ask = (want, text) => {
       const b = el("button", { type: "button" }, text);
       b.onclick = () => post(`${base}/${action}`, { player: me, want }).then((r) => { if (r.view) apply(r.view); if (!r.ok && r.error) { note = { word: label, msg: r.error }; render(); } });
       return b;
     };
-    const others = v.players.filter((p) => p.id !== me && !p.finish);
+    const others = voters.filter((p) => p.id !== me);
     const asked = others.filter((p) => asks.includes(p.id)).map((p) => p.name);
     const notYet = others.filter((p) => !asks.includes(p.id)).map((p) => p.name);
     if (asks.includes(me)) return [el("span", {}, `${asking}, waiting for ${notYet.join(", ")}`), ask(false, "cancel")];
@@ -1308,25 +1308,18 @@ function duelPage(id) {
     nav.hidden = !(mine ? mine.finish : v.status === "over");
     if (nav.hidden) return;
     const kids = [];
+    if (v.next || v.rematch) picking = false;  // (so a withdrawn proposal leaves just "rematch")
     if (v.next) {
-      // proposed: the proposer waits here for the others, who accept it (or not) when they're ready
-      const n = v.next, names = (ps) => ps.map((p) => p.name).join(", ");
-      const go = (label, cls) => { const a = el("a", { href: `/d/${v.room}`, class: cls }, label); a.onclick = () => carry(n.id); return a; };
-      const what = `${"collab" in n ? (n.collab ? "co-op" : "compete") + " " : ""}rematch${n.mode === "random" ? " on a random word" : n.number === today ? " on today’s" : n.number ? ` on #${n.number}` : ""}`;
-      const gone = (n.players ?? []).filter((p) => p.id !== me);
-      if (n.players?.some((p) => p.id === me)) kids.push(el("span", {}, "you’re in the rematch"), go("go →", "lead"));
-      else if (n.by === me) {
-        const waiting = v.players.filter((p) => p.id !== me && !gone.some((q) => q.id === p.id));
-        kids.push(el("span", {}, `you proposed a ${what}`,
-          ...(gone.length ? [" · ", el("b", {}, names(gone)), gone.length === 1 ? " is in" : " are in"] : []),
-          ...(waiting.length ? [` · waiting for ${names(waiting)}`] : [])),
-          go(gone.length ? "go →" : "go in now", gone.length ? "lead" : "quiet"));
-      } else {
-        const by = v.players.find((p) => p.id === n.by);
-        kids.push(el("span", {}, by ? el("b", {}, by.name) : "someone", ` proposed a ${what}`), go(mine ? "accept" : "join", "lead"));
-      }
-    }
-    else if (mine && v.players.length > 1 && !picking) {
+      // everyone said yes: it's made, and in its lobby you ready up as ever
+      const a = el("a", { href: `/d/${v.room}`, class: "lead" }, "on to the rematch →");
+      a.onclick = () => carry(v.next);
+      kids.push(a);
+    } else if (v.rematch && mine) {
+      // proposed: a vote of this round's players, like a hint; the proposer cancelling withdraws it
+      const r = v.rematch;
+      const what = `${r.collab ? "co-op" : "compete"} rematch${r.mode === "random" ? " on a random word" : !r.puzzle || r.puzzle === today ? " on today’s" : ` on #${r.puzzle}`}`;
+      kids.push(...vote(v, r.asks, { action: "rematch", label: "rematch", asking: r.by === me ? `proposed a ${what}` : `said yes to a ${what}`, wants: `a ${what}`, voters: v.players }));
+    } else if (mine && v.players.length > 1 && !picking) {
       const b = el("button", { class: "lead", type: "button" }, "rematch");
       b.onclick = () => { picking = true; render(); };
       kids.push(b);

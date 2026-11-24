@@ -15,6 +15,7 @@ export const AWAY_MS = Number(process.env.AWAY_MS ?? 90_000);
 /** @typedef {{word:string, score:number, rank:number|null, at:number}} Check  a word scored after you finished, for your eyes only */
 /** @typedef {{at:number, found:boolean}} Finish */
 /** @typedef {{from:number, to:number|null, by:string|null}} Pause  by: who pressed pause, or null when everyone left */
+/** @typedef {{by:string, puzzle?:number, mode?:string, collab:boolean, avoid?:string[], asks:string[]}} Rematch  proposed, not yet made; asks: who has said yes */
 /** @typedef {{id:string, name:string, guesses:Guess[], finish:Finish|null, ready?:boolean, checks?:Check[]}} Player  ready: in the lobby, said they are set to go */
 
 export class Duel {
@@ -26,8 +27,8 @@ export class Duel {
     this.players = new Map();
     /** @type {number|null} */ this.startsAt = null;
     this.createdAt = now;
-    /** @type {string|null} the rematch duel, once someone asks for one */ this.next = null;
-    /** @type {string|null} who asked for it: everyone else is asked to accept */ this.nextBy = null;
+    /** @type {string|null} the rematch duel, once every player has said yes to one */ this.next = null;
+    /** @type {Rematch|null} a rematch someone has proposed, until it's made (or withdrawn) */ this.rematch = null;
     /** @type {{id:string, name:string}|null} whoever set the word (a "set" duel): watches, sees every word, doesn't play */ this.setter = null;
     /** the room: the first duel's id, kept by every rematch after it; its link always opens the latest round */ this.room = id;
     /** @type {Pause[]} */ this.pauses = [];
@@ -206,9 +207,9 @@ export class Duel {
     return this.status(now) === "playing" ? [...this.players.values()].filter((p) => !p.finish) : [];
   }
 
-  /** One player's say in a vote of everyone still racing: the asks after it, and whether that's all of them. */
-  vote(asks, playerId, want, now) {
-    const racing = new Set(this.racers(now).map((p) => p.id));
+  /** One player's say in a vote of everyone still racing (or of `voters`): the asks after it, and whether that's all of them. */
+  vote(asks, playerId, want, now, voters = this.racers(now)) {
+    const racing = new Set(voters.map((p) => p.id));
     const next = asks.filter((id) => id !== playerId && racing.has(id));
     if (want) next.push(playerId);
     return [next, racing.size > 0 && [...racing].every((id) => next.includes(id))];
@@ -230,6 +231,24 @@ export class Duel {
     const [asks, all] = this.vote(this.giveUpAsks, playerId, want, now);
     this.giveUpAsks = asks;
     if (all) this.finishAll(false, now);
+  }
+
+  /**
+   * Propose a rematch (`pick`: its puzzle, mode and collab), say yes to the one proposed, or take that back. It's a vote
+   * of every player of this round; the proposer taking it back withdraws it. Returns the proposal once all have said yes.
+   */
+  askRematch(playerId, want, pick, now) {
+    if (!this.players.has(playerId)) throw new DuelError("not in this duel");
+    if (this.next) return null;  // already made
+    if (want && !this.rematch) {
+      if (!pick) throw new DuelError("that rematch was withdrawn");
+      this.rematch = { by: playerId, ...pick, asks: [] };
+    }
+    if (!this.rematch) return null;
+    const [asks, all] = this.vote(this.rematch.asks, playerId, want, now, [...this.players.values()]);
+    this.rematch.asks = asks;
+    if (!asks.includes(this.rematch.by)) this.rematch = null;
+    return all ? this.rematch : null;
   }
 
   /** Co-op: the whole room finishes at this moment. */
@@ -281,11 +300,8 @@ export class Duel {
     if (open && [...this.players.values()].every((q) => q.finish)) open.to = now;
   }
 
-  /**
-   * What one viewer may see: everything once they've finished (or it's over), otherwise only scores of others.
-   * `after`: the rematch duel, if at hand, for what it is and who has gone into it.
-   */
-  viewFor(viewerId, now, after = null) {
+  /** What one viewer may see: everything once they've finished (or it's over), otherwise only scores of others. */
+  viewFor(viewerId, now) {
     const status = this.status(now);
     const reveal = status === "over" || !!this.players.get(viewerId)?.finish || this.setter?.id === viewerId;
     const ended = status === "over" ? this.endedAt() : now;
@@ -307,11 +323,8 @@ export class Duel {
       giveUpAsks: status === "playing" ? this.giveUpAsks.filter((id) => !this.players.get(id)?.finish) : [],
       secret: reveal ? this.puzzle.secret : null,
       max: MAX_PLAYERS,
-      next: this.next && {
-        id: this.next,
-        by: this.nextBy,
-        ...(after && { collab: after.collab, mode: after.puzzle.mode ?? "semantle", number: after.puzzle.number, players: [...after.players.values()].map((p) => ({ id: p.id, name: p.name })) }),
-      },
+      next: this.next,
+      rematch: this.rematch && { by: this.rematch.by, puzzle: this.rematch.puzzle, mode: this.rematch.mode, collab: this.rematch.collab, asks: this.rematch.asks },
       room: this.room,
       you: viewerId,
       players: [...this.players.values()].map((p) => ({
@@ -337,7 +350,7 @@ export class Duel {
   }
 
   toJSON() {
-    return { id: this.id, puzzle: this.puzzle, players: [...this.players.values()], startsAt: this.startsAt, createdAt: this.createdAt, next: this.next, nextBy: this.nextBy, room: this.room, setter: this.setter, pauses: this.pauses, seen: this.seen, hintAsks: this.hintAsks, collab: this.collab, giveUpAsks: this.giveUpAsks };
+    return { id: this.id, puzzle: this.puzzle, players: [...this.players.values()], startsAt: this.startsAt, createdAt: this.createdAt, next: this.next, rematch: this.rematch, room: this.room, setter: this.setter, pauses: this.pauses, seen: this.seen, hintAsks: this.hintAsks, collab: this.collab, giveUpAsks: this.giveUpAsks };
   }
 
   static fromJSON(o) {
@@ -345,7 +358,7 @@ export class Duel {
     for (const p of o.players) d.players.set(p.id, { finish: null, ...p });
     d.startsAt = o.startsAt;
     d.next = o.next ?? null;
-    d.nextBy = o.nextBy ?? null;
+    d.rematch = o.rematch ?? null;
     d.room = o.room ?? o.id;
     d.setter = o.setter ?? null;
     d.pauses = o.pauses ?? [];
