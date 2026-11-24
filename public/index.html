@@ -204,10 +204,10 @@
   li.check .w { font-style: italic; }
   /* a guess being scored: your word as you typed it, in full ink; only the score waits */
   li.pending .s { color: var(--faint); }
-  /* the word gives way first (…); the hint/after tag keeps its full width */
-  li .w { display: flex; align-items: baseline; white-space: nowrap; }
+  li .w { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* with a tag (hint, after) the word gives way first (…); the tag keeps its full width */
+  li .w:has(small) { display: flex; align-items: baseline; }
   li .w .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  li .w small { flex: none; }
   li .w.hidden { filter: blur(5px); user-select: none; color: var(--faint); }
   li .s { text-align: right; }
   li .p { font-size: .85em; white-space: nowrap; }
