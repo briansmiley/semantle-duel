@@ -52,8 +52,3 @@ export async function hint(secret, best) {
   const h = await get(`/semantle/hint/${encodeURIComponent(secret)}/${best}/en`);
   return h?.success && h.hintWord ? String(h.hintWord) : null;
 }
-
-/** The same, as word -> rank. */
-export async function nearest(secret) {
-  return new Map((await neighbours(secret)).map((n) => [n.word, n.rank]));
-}
