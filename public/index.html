@@ -1669,22 +1669,32 @@ function cutOf(target) {
   const e = cell?.querySelector(".t") ?? cell;
   return e && e.scrollWidth > e.clientWidth ? { e, text: e.textContent } : null;
 }
-// Hover shows it as a title; a tap (which shows no title) floats it near the word until the next tap, scroll or 2s.
-// The tap is a pointerup, not a click: an iPhone sends no click for a tap on plain text.
+// A cut word's full text floats near it: while a mouse hovers it, or after a tap (touch/pen) until the next tap, scroll or 2s.
+// The tap is a pointerup, not a click: an iPhone sends no click for a tap on plain text. A mouse is driven by hover alone.
 let cutTip, cutTimer;
 function hideCut() { cutTip?.remove(); cutTip = null; clearTimeout(cutTimer); }
-addEventListener("pointerover", (e) => { const c = cutOf(e.target), cell = e.target.closest?.("li .w, li .by"); if (cell) cell.title = c?.text ?? ""; });
-addEventListener("pointerup", (e) => {
-  const c = cutOf(e.target), same = c && cutTip?.cutEl === c.e;
+function showCut(c, ms) {
   hideCut();
-  if (!c || same) return;
   const r = c.e.getBoundingClientRect();
   cutTip = el("div", { id: "cut" }, c.text);
   cutTip.cutEl = c.e;
   document.body.append(cutTip);
   cutTip.style.left = `${Math.max(4, Math.min(r.left, innerWidth - cutTip.offsetWidth - 4))}px`;
   cutTip.style.top = `${r.top - cutTip.offsetHeight - 4 < 4 ? r.bottom + 4 : r.top - cutTip.offsetHeight - 4}px`;
-  cutTimer = setTimeout(hideCut, 2000);
+  if (ms) cutTimer = setTimeout(hideCut, ms);
+}
+addEventListener("pointerover", (e) => {
+  const c = e.pointerType === "mouse" && cutOf(e.target);
+  if (c && cutTip?.cutEl !== c.e) showCut(c);
+});
+addEventListener("pointerout", (e) => {
+  if (e.pointerType === "mouse" && cutTip && cutOf(e.relatedTarget ?? document.body)?.e !== cutTip.cutEl) hideCut();
+});
+addEventListener("pointerup", (e) => {
+  if (e.pointerType === "mouse") return;
+  const c = cutOf(e.target), same = c && cutTip?.cutEl === c.e;
+  hideCut();
+  if (c && !same) showCut(c, 2000);
 });
 addEventListener("scroll", hideCut, true);
 
