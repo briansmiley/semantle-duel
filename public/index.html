@@ -233,9 +233,11 @@
   /* a guess being scored: your word as you typed it, in full ink; only the score waits */
   li.pending .s { color: var(--faint); }
   li .w { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  /* with a tag (hint, after) the word gives way first (…); the tag keeps its full width */
+  /* with a tag (hint, after): the word and its tag each cut with their own ellipsis */
   li .w:has(small) { display: flex; align-items: baseline; }
   li .w .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  /* when even that's short, the tag gives way before the word, down to "h…" */
+  li .w:has(small) small { flex-shrink: 1000; min-width: 1.4em; overflow: hidden; text-overflow: ellipsis; }
   li .w.hidden, .chip .w.hidden { filter: blur(5px); user-select: none; color: var(--faint); }
   li .s { text-align: right; }
   li .p { font-size: .85em; white-space: nowrap; }
