@@ -520,7 +520,8 @@ function openList(rooms) {
 const VOICE_INTO = "sd-voice-into";  // sessionStorage: "<duel id>|<when>": this tab was in voice, heading into (or reloading) that duel
 
 // Propose a rematch of a finished duel on this puzzle; whoever asks first sets it, and it's made once every player
-// has said yes. Nobody is moved off the finished round: returns its view, with the proposal in it.
+// has said yes. Nobody is moved off the finished round: returns its view, with the proposal in it (someone else's,
+// still to be answered, if they asked first).
 async function rematch(id, puzzle, button, mode, collab) {
   button.disabled = true;
   const r = await post(`/d/${id}/rematch`, { player: me, puzzle, mode, collab, avoid: mode === "random" ? playedWords() : undefined });
@@ -1457,7 +1458,7 @@ function duelPage(id) {
       if (pick && !!collab !== value) b.onclick = () => pick(value);
       return b;
     };
-    return el("span", { class: "modes" }, opt("compete", false), opt("collab", true));
+    return el("span", { class: "modes" }, opt("compete", false), opt("co-op", true));
   }
 
   // A co-op round is one board, drawn by side() as if it were yours: everyone's guesses in one list, each

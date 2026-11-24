@@ -236,10 +236,11 @@ export class Duel {
   /**
    * Propose a rematch (`pick`: its puzzle, mode and collab), say yes to the one proposed, or take that back. It's a vote
    * of every player of this round; the proposer taking it back withdraws it. Returns the proposal once all have said yes.
+   * A pick while one is already proposed changes nothing: it's no yes to a rematch its sender may not have seen.
    */
   askRematch(playerId, want, pick, now) {
     if (!this.players.has(playerId)) throw new DuelError("not in this duel");
-    if (this.next) return null;  // already made
+    if (this.next || (pick && this.rematch)) return null;  // already made, or someone proposed first
     if (want && !this.rematch) {
       if (!pick) throw new DuelError("that rematch was withdrawn");
       this.rematch = { by: playerId, ...pick, asks: [] };
