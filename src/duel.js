@@ -318,6 +318,7 @@ export class Duel {
           score: g.score,
           rank: g.rank,
           at: g.at,
+          time: this.elapsed(g.at),  // on the round's clock, so the chart leaves out paused time
           hint: !!g.hint,
           // someone else found their own way to this word too (scores give that away anyway)
           shared: !g.hint && [...this.players.values()].some((q) => q !== p && q.guesses.some((h) => h.word === g.word && !h.hint)),

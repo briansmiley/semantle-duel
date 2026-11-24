@@ -188,14 +188,29 @@
   #tally b { font-weight: 400; color: var(--ink); }
   #tally .lead b { color: var(--hot); }
   #graph { margin: .3rem 0 .8rem; max-width: 40rem; color: var(--faint); font-size: .95rem; }
-  #graph .opts { display: flex; flex-wrap: wrap; gap: .2rem 1.4rem; }
-  #graph .modes { flex-wrap: wrap; gap: .1rem .9rem; }
+  #graph .opts { display: flex; flex-wrap: wrap; align-items: baseline; gap: .2rem 1.4rem; }
   #graph .key { display: inline-block; width: 22px; margin-right: .3em; }
   #graph .key svg { display: block; width: 22px; height: 6px; }
+  /* the legend is the way in to choosing whose lines show */
+  #graph .who { position: relative; }
+  #graph .legend { color: inherit; display: inline-flex; flex-wrap: wrap; gap: .1rem .9rem; text-align: left; border-bottom: 1px dotted var(--faint); }
+  #graph .legend:hover { color: var(--ink); }
+  #graph .legend .off { opacity: .4; }
+  #graph .pick { position: absolute; z-index: 5; top: calc(100% + .3rem); left: 0; min-width: 11rem; display: grid; gap: .25rem; padding: .5rem .8rem .6rem; background: var(--paper); color: var(--ink); border: 1px solid var(--rule); box-shadow: 0 6px 24px rgb(0 0 0 / .14); }
+  #graph .pick .all { display: flex; gap: 1rem; color: var(--faint); font-size: .9rem; padding-bottom: .25rem; border-bottom: 1px solid var(--rule); }
+  #graph .pick .all button { border-bottom: 1px dotted currentColor; }
+  #graph .pick .all button:hover { color: var(--ink); }
+  #graph .pick label { display: flex; align-items: center; gap: .4rem; cursor: pointer; }
+  #graph .pick input { margin: 0; accent-color: var(--hot); }
+  #graph .x { text-align: center; }
+  #graph .xlabel { color: var(--faint); border-bottom: 1px dotted var(--faint); }
+  #graph .xlabel:hover { color: var(--ink); }
   #graph .plot { display: block; width: 100%; height: auto; overflow: visible; margin-top: .4rem; }
   #graph .plot text { fill: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums; }
   #graph .plot .rule { stroke: var(--rule); }
   #graph .plot .zero { stroke: var(--faint); }
+  #graph .plot .mark { opacity: .5; }
+  #graph .plot text.mark { font-size: 10px; }
   #graph path { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
   #graph circle { stroke: var(--paper); stroke-width: 1.5; }
 
@@ -1299,10 +1314,17 @@ function duelPage(id) {
     nav.replaceChildren(...kids);
   }
 
-  // The finished round as a chart: each player's similarity, by guess number or time, raw or as a rolling
-  // average. Hints are left out, being nobody's guess. Only once it's over, so it can't show a race still running.
-  let chart = { open: false, x: "n", avg: false, who: null }, chartW = 0;  // who: one player's id, or null for everyone
+  // The finished round as a chart: each player's similarity, by guess number or time on the round's clock, raw
+  // or as a rolling average, with faint lines where the proximity column's ranks 1, 500 and 850 fall. Hints are
+  // left out, being nobody's guess. Only once it's over, so it can't show a race still running.
+  let chart = { open: false, x: "n", avg: false, hide: new Set(), picking: false }, chartW = 0;  // hide: unticked in the legend's picker
   addEventListener("resize", () => { if (view && chart.open && $("#graph").clientWidth !== chartW) graph(view); });
+  // a tap anywhere but the picker or the legend closes the picker (the path, since a tap in it may redraw it)
+  addEventListener("click", (e) => {
+    if (!chart.picking || e.composedPath().some((n) => n.classList?.contains("pick") || n.classList?.contains("legend"))) return;
+    chart.picking = false;
+    graph(view);
+  });
   function graph(v) {
     const box = $("#graph");
     box.hidden = !chart.open || v.status !== "over";
@@ -1312,13 +1334,16 @@ function duelPage(id) {
       const gs = p.guesses.filter((g) => !g.hint);
       const points = gs.map((g, k) => {
         const recent = chart.avg ? gs.slice(Math.max(0, k - 4), k + 1) : [g];  // up to the last five of their own
-        return [byTime ? Math.max(0, g.at - v.startsAt) : g.n, recent.reduce((sum, h) => sum + h.score, 0) / recent.length];
+        return [byTime ? g.time : g.n, recent.reduce((sum, h) => sum + h.score, 0) / recent.length];
       });
       // a colour and a dash each, so no two of the eight players look alike, in colour or without it
       return { p, gs, points, color: GRAPH_COLORS[i % 4], dash: GRAPH_DASHES[(i + (i >> 2)) % 4] };
     });
-    // the axes fit everyone's raw scores, so they hold still as the options change
-    const scores = series.flatMap((s) => s.gs.map((g) => g.score)), xs = series.flatMap((s) => s.points.map(([x]) => x));
+    // in the proximity bar's own colour at that rank; labelled by nearness, rank 1 being the 1000th closest word
+    const t = v.thresholds;
+    const lines = t ? [[t.r1, 1, "1000th"], [t.r500, 500, "500th"], [t.r850, 850, "150th"]].filter(([y]) => y != null) : [];
+    // the axes fit everyone's raw scores and the lines, so they hold still as the options change
+    const scores = [...series.flatMap((s) => s.gs.map((g) => g.score)), ...lines.map(([y]) => y)], xs = series.flatMap((s) => s.points.map(([x]) => x));
     const yStep = Math.max(...scores, 0) - Math.min(...scores, 0) > 60 ? 25 : 10;
     const yLo = Math.floor(Math.min(...scores, 0) / yStep) * yStep, yHi = Math.max(yLo + yStep, Math.ceil(Math.max(...scores) / yStep) * yStep);
     const xLo = byTime ? 0 : 1, xHi = Math.max(xLo + (byTime ? 1000 : 1), ...xs);
@@ -1326,25 +1351,28 @@ function duelPage(id) {
     const xStep = xOpts.find((s) => (xHi - xLo) / s <= 5) ?? xOpts.at(-1);
 
     chartW = box.clientWidth;
-    const W = chartW || 600, H = 200, L = 30, R = 10, T = 18, B = 22;
+    const W = chartW || 600, H = 200, L = 44, R = 10, T = 8, B = 22;
     const sx = (x) => (L + ((x - xLo) / (xHi - xLo)) * (W - L - R)).toFixed(1);
     const sy = (y) => (T + ((yHi - y) / (yHi - yLo)) * (H - T - B)).toFixed(1);
-    let marks = `<text x="0" y="10">similarity</text>`;
+    let marks = `<text transform="translate(10 ${(T + H - B) / 2}) rotate(-90)" text-anchor="middle">similarity</text>`;
     for (let y = yLo; y <= yHi; y += yStep) marks += `<line class="${y === 0 ? "zero" : "rule"}" x1="${L}" x2="${W - R}" y1="${sy(y)}" y2="${sy(y)}"/><text x="${L - 5}" y="${+sy(y) + 4}" text-anchor="end">${y}</text>`;
     for (let x = Math.ceil(xLo / xStep) * xStep; x <= xHi; x += xStep) marks += `<text x="${sx(x)}" y="${H - 5}" text-anchor="middle">${byTime ? mmss(x) : x}</text>`;
+    for (const [y, rank, label] of lines) {
+      const c = `hsl(${Math.round((rank / 1000) * 125)} 68% 46%)`;  // as proximity() colours its bar
+      marks += `<line class="mark" x1="${L}" x2="${W - R}" y1="${sy(y)}" y2="${sy(y)}" style="stroke:${c}"/><text class="mark" x="${W - R}" y="${+sy(y) - 3}" text-anchor="end" style="fill:${c}">${label}</text>`;
+    }
     for (const s of series) {
-      if (!s.points.length || (chart.who && chart.who !== s.p.id)) continue;
+      if (!s.points.length || chart.hide.has(s.p.id)) continue;
       const [endX, endY] = s.points.at(-1);
       if (s.points.length > 1) marks += `<path d="M${s.points.map(([x, y]) => `${sx(x)} ${sy(y)}`).join("L")}" style="stroke:var(${s.color})" stroke-dasharray="${s.dash}"/>`;
       marks += `<circle cx="${sx(endX)}" cy="${sy(endY)}" r="4" style="fill:var(${s.color})"/>`;
     }
     const plot = el("div", {});
-    plot.innerHTML = `<svg class="plot" viewBox="0 0 ${W} ${H}" role="img" aria-label="each player's similarity over the round">${marks}</svg>`;  // numbers only: names stay in the buttons
+    plot.innerHTML = `<svg class="plot" viewBox="0 0 ${W} ${H}" role="img" aria-label="each player's similarity over the round">${marks}</svg>`;  // numbers only: names stay in the legend
 
-    const opts = (key, list) => el("span", { class: "modes" }, ...list.map(([value, label, off]) => {
-      const b = el("button", { type: "button", "aria-pressed": String(chart[key] === value) }, label);
-      b.disabled = !!off;
-      b.onclick = () => { chart[key] = value; graph(view); };
+    const avg = el("span", { class: "modes" }, ...[[false, "raw"], [true, "5-avg"]].map(([value, label]) => {
+      const b = el("button", { type: "button", "aria-pressed": String(chart.avg === value) }, label);
+      b.onclick = () => { chart.avg = value; graph(view); };
       return b;
     }));
     const swatch = (s) => {
@@ -1352,15 +1380,27 @@ function duelPage(id) {
       k.innerHTML = `<svg viewBox="0 0 22 6" aria-hidden="true"><line x1="1" x2="21" y1="3" y2="3" stroke-width="2" stroke-linecap="round" style="stroke:var(${s.color})" stroke-dasharray="${s.dash}"/></svg>`;
       return k;
     };
-    const paused = v.endedAt - v.startsAt - v.elapsed;  // the view has only the total: guess times can't be moved back past each pause
-    box.replaceChildren(
-      el("div", { class: "opts" },
-        opts("x", [["n", v.collab ? "room’s guess #" : "guess #"], ["t", "time"]]),
-        opts("avg", [[false, "raw"], [true, "avg of last 5"]]),
-        opts("who", [[null, "everyone"], ...series.map((s) => [s.p.id, el("span", {}, swatch(s), s.p.id === me ? "you" : s.p.name, s.gs.length ? "" : " –"), !s.gs.length])])),
-      plot.firstChild,
-      byTime && paused >= 1000 ? el("small", {}, `time includes ${mmss(paused)} paused`) : "",
-    );
+    const name = (s) => (s.p.id === me ? "you" : s.p.name);
+    const legend = el("button", { type: "button", class: "legend", "aria-expanded": String(chart.picking), title: "choose whose lines show" },
+      ...series.map((s) => el("span", { class: chart.hide.has(s.p.id) || !s.gs.length ? "off" : "" }, swatch(s), name(s))));
+    legend.onclick = () => { chart.picking = !chart.picking; graph(view); };
+    const every = (label, f) => {
+      const b = el("button", { type: "button" }, label);
+      b.onclick = () => { f(); graph(view); };
+      return b;
+    };
+    const pick = !chart.picking ? "" : el("div", { class: "pick" },
+      el("div", { class: "all" }, every("select all", () => chart.hide.clear()), every("select none", () => series.forEach((s) => chart.hide.add(s.p.id)))),
+      ...series.map((s) => {
+        const tick = el("input", { type: "checkbox" });
+        tick.checked = !chart.hide.has(s.p.id);
+        tick.onchange = () => { tick.checked ? chart.hide.delete(s.p.id) : chart.hide.add(s.p.id); graph(view); };
+        return el("label", {}, tick, swatch(s), name(s));
+      }));
+    const xLabel = el("button", { type: "button", class: "xlabel", title: byTime ? "by guess number" : "by time" },
+      byTime ? "time" : v.collab ? "room’s guess #" : "guess #", el("span", { "aria-hidden": "true" }, " ⇄"));
+    xLabel.onclick = () => { chart.x = byTime ? "n" : "t"; graph(view); };
+    box.replaceChildren(el("div", { class: "opts" }, avg, el("span", { class: "who" }, legend, pick)), plot.firstChild, el("div", { class: "x" }, xLabel));
   }
 
   // Compete or collab. `pick` (a new value) is left out for someone who only gets to see it.
