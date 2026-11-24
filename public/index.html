@@ -233,11 +233,12 @@
   /* a guess being scored: your word as you typed it, in full ink; only the score waits */
   li.pending .s { color: var(--faint); }
   li .w { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  /* with a tag (hint, after): the word and its tag each cut with their own ellipsis */
+  /* with a tag (hint, after): the word takes the ellipsis, not the tag */
   li .w:has(small) { display: flex; align-items: baseline; }
   li .w .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  /* when even that's short, the tag gives way before the word, down to "h…" */
-  li .w:has(small) small { flex-shrink: 1000; min-width: 1.4em; overflow: hidden; text-overflow: ellipsis; }
+  /* when even that's short, the tag gives way before the word: it snaps to its first letter ("h") as soon as it
+     can't fit whole, the rest wrapping onto a line that's hidden */
+  li .w:has(small) small { flex-shrink: 1000; min-width: .8em; display: inline-flex; flex-wrap: wrap; max-height: 1.3em; overflow: hidden; }
   li .w.hidden, .chip .w.hidden { filter: blur(5px); user-select: none; color: var(--faint); }
   li .s { text-align: right; }
   li .p { font-size: .85em; white-space: nowrap; }
@@ -1640,7 +1641,7 @@ function duelPage(id) {
     const li = el("li", { "data-key": `${p.id}:${isLatest ? "latest" : key}`, class: [isLatest && "latest", lands && "landed", fresh && !lands && "fresh", isAgain && "again", g.shared && "shared", g.check && "check", v.secret && g.word === v.secret && "secret"].filter(Boolean).join(" ") });
     li.append(
       el("span", { class: "n num", title: g.shared ? "guessed by someone else too" : "" }, g.check ? "·" : g.n),
-      wordOf(g, p, g.hint && !v.collab ? el("small", {}, "hint") : g.check ? el("small", {}, "after") : ""),
+      wordOf(g, p, g.hint && !v.collab ? tag("hint") : g.check ? tag("after") : ""),
       ...(v.collab ? [el("span", { class: g.hint ? "by hint" : "by" }, g.hint ? "hint" : g.check ? "" : owner === me ? "you" : v.players.find((q) => q.id === owner)?.name ?? "")] : []),
       el("span", { class: "s num", style: `color:${heat(g)}` }, g.score.toFixed(2)),
       proximity(g),
@@ -1651,6 +1652,11 @@ function duelPage(id) {
 
 // One per player in the finished round's chart (see graph), by their place in the room.
 const GRAPH_COLORS = ["--hot", "--cool", "--ink", "--warm"], GRAPH_DASHES = ["", "7 4", "1 4", "9 4 1 4"];
+
+// A guess's tag, its first letter apart from the rest, so a tight row can show just that letter (see li .w small).
+function tag(t) {
+  return el("small", {}, el("span", {}, t[0]), el("span", {}, t.slice(1)));
+}
 
 // A guess's word. One you may not see yet is a run of x's to blur, the same length each time it's drawn.
 function wordOf(g, p, ...kids) {
