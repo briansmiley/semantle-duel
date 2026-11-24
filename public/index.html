@@ -146,7 +146,7 @@
     #board, #board.crowd { grid-template-columns: minmax(0, 1fr); gap: 2rem; margin-top: 1.2rem; }
     #board.mine .side:not(.me), #board.mine .others { display: none; }
     /* narrower columns, so the word itself has room */
-    #duel li { grid-template-columns: 1.6em minmax(0, 1fr) 3.9em 6.6em; gap: .5em; }
+    #duel li { grid-template-columns: 1.6em minmax(0, 1fr) 3.6em 6.6em; gap: .5em; }
     /* everyone else in one strip, a line high however many: leader first, sideways if it overflows */
     #rivals:not([hidden]) { display: block; margin: .9rem 0 0; }
     #rivals .strip { display: flex; gap: 1.2rem; overflow-x: auto; scrollbar-width: none; white-space: nowrap; padding: .2rem 0 .4rem; border-bottom: 1px solid var(--rule); }
@@ -190,7 +190,7 @@
   #tally .lead b { color: var(--hot); }
 
   ol { list-style: none; margin: .5em 0 0; padding: 0; }
-  li { display: grid; grid-template-columns: 2em minmax(0, 1fr) 4.6em 8em; align-items: center; gap: .6em; padding: .32em 0; border-bottom: 1px solid var(--rule); }
+  li { display: grid; grid-template-columns: 2em minmax(0, 1fr) 3.6em 8em; align-items: center; gap: .6em; padding: .32em 0; border-bottom: 1px solid var(--rule); }
   li.heads { color: var(--faint); border-bottom-color: var(--ink); padding-top: 0; }
   li.heads span { font-size: .75em; }
   li.heads .sortby { all: unset; display: block; cursor: pointer; white-space: nowrap; }  /* the whole cell takes the click, not just a "#" */
@@ -204,7 +204,10 @@
   li.check .w { font-style: italic; }
   /* a guess being scored: your word as you typed it, in full ink; only the score waits */
   li.pending .s { color: var(--faint); }
-  li .w { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* the word gives way first (…); the hint/after tag keeps its full width */
+  li .w { display: flex; align-items: baseline; white-space: nowrap; }
+  li .w .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  li .w small { flex: none; }
   li .w.hidden { filter: blur(5px); user-select: none; color: var(--faint); }
   li .s { text-align: right; }
   li .p { font-size: .85em; white-space: nowrap; }
@@ -1493,7 +1496,7 @@ function duelPage(id) {
     const word = g.word ?? "x".repeat(4 + ((g.n * 7 + p.id.charCodeAt(0)) % 6));
     li.append(
       el("span", { class: "n num", title: g.shared ? "guessed by someone else too" : "" }, g.check ? "·" : g.n),
-      el("span", { class: "w" + (g.word ? "" : " hidden") }, word, g.hint && !v.collab ? el("small", {}, "hint") : g.check ? el("small", {}, "after") : ""),
+      el("span", { class: "w" + (g.word ? "" : " hidden") }, el("span", { class: "t" }, word), g.hint && !v.collab ? el("small", {}, "hint") : g.check ? el("small", {}, "after") : ""),
       ...(v.collab ? [el("span", { class: "by" }, g.hint ? "hint" : g.check ? "" : owner === me ? "you" : v.players.find((q) => q.id === owner)?.name ?? "")] : []),
       el("span", { class: "s num", style: `color:${heat(g)}` }, g.score.toFixed(2)),
       proximity(g),
