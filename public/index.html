@@ -521,12 +521,13 @@ function openList(rooms) {
 let intoRematch = () => {};
 const VOICE_INTO = "sd-voice-into";  // sessionStorage: "<duel id>|<when>": this tab was in voice, heading into (or reloading) that duel
 
-// Rematch a finished duel on this puzzle; whoever asks first sets it up, and everyone lands in the same one.
+// Propose a rematch of a finished duel on this puzzle; whoever asks first sets it up, and the others are asked
+// to accept it. Nobody is moved off the finished round: returns its view, with the rematch in it.
 async function rematch(id, puzzle, button, mode, collab) {
   button.disabled = true;
   const r = await post(`/d/${id}/rematch`, { player: me, puzzle, mode, collab, avoid: mode === "random" ? playedWords() : undefined });
-  // the room's link: it opens the rematch
-  if (r.view?.next) { intoRematch(r.view.next); location.href = `/d/${r.view.room ?? r.view.next}`; } else button.disabled = false;
+  if (!r.view?.next) button.disabled = false;
+  return r.view;
 }
 
 // Rooms this browser made: opening one joins you, as does opening a room you've played in (but no other).
@@ -970,7 +971,8 @@ async function archivePage() {
     const b = el("button", { class: played.has(n) ? "played" : "", title: played.has(n) ? "played" : "" },
       el("b", { class: "num" }, `#${n}`),
       el("small", {}, d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })));
-    b.onclick = () => (rematchOf ? rematch(rematchOf, n, b, undefined, collabNext === null ? undefined : collabNext === "1") : newDuel(n, b));
+    // a rematch: back to the finished round (just that one: the room's link would open the rematch)
+    b.onclick = () => (rematchOf ? rematch(rematchOf, n, b, undefined, collabNext === null ? undefined : collabNext === "1").then((v) => v?.next && (location.href = `/d/${rematchOf}?round`)) : newDuel(n, b));
     months.get(key).push(b);
   }
   $("#archive .months").replaceChildren(...[...months].flatMap(([m, bs]) => [el("h3", {}, m), el("div", { class: "grid" }, ...bs)]));
@@ -1310,9 +1312,22 @@ function duelPage(id) {
     if (nav.hidden) return;
     const kids = [];
     if (v.next) {
-      const a = el("a", { href: `/d/${v.room}`, class: "lead" }, "join the rematch →");
-      a.onclick = () => intoRematch(v.next);
-      kids.push(a);
+      // proposed: the proposer waits here for the others, who accept it (or not) when they're ready
+      const n = v.next, names = (ps) => ps.map((p) => p.name).join(", ");
+      const go = (label, cls) => { const a = el("a", { href: `/d/${v.room}`, class: cls }, label); a.onclick = () => intoRematch(n.id); return a; };
+      const what = `${"collab" in n ? (n.collab ? "co-op" : "compete") + " " : ""}rematch${n.mode === "random" ? " on a random word" : n.number === today ? " on today’s" : n.number ? ` on #${n.number}` : ""}`;
+      const gone = (n.players ?? []).filter((p) => p.id !== me);
+      if (n.players?.some((p) => p.id === me)) kids.push(el("span", {}, "you’re in the rematch"), go("go →", "lead"));
+      else if (n.by === me) {
+        const waiting = v.players.filter((p) => p.id !== me && !gone.some((q) => q.id === p.id));
+        kids.push(el("span", {}, `you proposed a ${what}`,
+          ...(gone.length ? [" · ", el("b", {}, names(gone)), gone.length === 1 ? " is in" : " are in"] : []),
+          ...(waiting.length ? [` · waiting for ${names(waiting)}`] : [])),
+          go(gone.length ? "go →" : "go in now", gone.length ? "lead" : "quiet"));
+      } else {
+        const by = v.players.find((p) => p.id === n.by);
+        kids.push(el("span", {}, by ? el("b", {}, by.name) : "someone", ` proposed a ${what}`), go(mine ? "accept" : "join", "lead"));
+      }
     }
     else if (mine && v.players.length > 1 && !picking) {
       const b = el("button", { class: "lead", type: "button" }, "rematch");
@@ -1322,12 +1337,12 @@ function duelPage(id) {
       const collab = nextCollab ?? !!v.collab;  // as this round, unless changed
       const go = (label, puzzle) => {
         const b = el("button", { type: "button" }, label);
-        b.onclick = async () => rematch(v.id, await puzzle(), b, undefined, collab);
+        b.onclick = async () => rematch(v.id, await puzzle(), b, undefined, collab).then((nv) => nv && apply(nv));
         return b;
       };
       kids.push(modeToggle(collab, (c) => { nextCollab = c; render(); }), el("span", { class: "pick" },
         el("span", {}, "rematch on"),
-        (() => { const b = el("button", { type: "button" }, "a random word"); b.onclick = () => rematch(v.id, undefined, b, "random", collab); return b; })(),
+        (() => { const b = el("button", { type: "button" }, "a random word"); b.onclick = () => rematch(v.id, undefined, b, "random", collab).then((nv) => nv && apply(nv)); return b; })(),
         today && today !== v.number ? go("today’s", async () => today) : "",
         el("a", { href: `/archive?rematch=${v.id}&collab=${collab ? 1 : 0}` }, "the archive"),
       ));

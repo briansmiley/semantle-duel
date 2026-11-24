@@ -106,7 +106,7 @@ function newId() {
 // here (not saved): it goes out with every view, and the offers, answers and ICE candidates
 // between two of them are passed along the event stream, the sender stamped by us, never read.
 function viewOf(room, player, now) {
-  return { ...room.duel.viewFor(player, now), thresholds: marks.get(room.duel.puzzle.secret) ?? null, voice: [...room.voice].map(([id, v]) => ({ id, muted: v.muted })), here: present(room) };
+  return { ...room.duel.viewFor(player, now, rooms.get(room.duel.next)?.duel), thresholds: marks.get(room.duel.puzzle.secret) ?? null, voice: [...room.voice].map(([id, v]) => ({ id, muted: v.muted })), here: present(room) };
 }
 
 /** The players with the page open right now. */
@@ -121,6 +121,11 @@ const LOBBY_GONE_MS = Number(process.env.LOBBY_GONE_MS ?? 45_000);
 function broadcast(room) {
   const now = Date.now();
   for (const l of room.listeners) send(l.res, viewOf(room, l.player, now));
+}
+
+// A finished round's summary shows who has gone on into its rematch: tell it when they do (or leave its lobby).
+function broadcastBefore(room) {
+  for (const r of rooms.values()) if (r.duel.next === room.duel.id) broadcast(r);
 }
 
 function send(res, view) {
@@ -228,6 +233,7 @@ async function handle(req, res) {
     const warm = ranked(duel.puzzle.secret).catch(() => {});
     if (duel.status(Date.now()) === "over") await warm;
     res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
+    if (duel.next) await findRoom(duel.next);  // for what the rematch is, and who has gone into it
     const l = { player, res };
     room.listeners.add(l);
     if (duel.touch(player, Date.now()) || (duel.status(Date.now()) === "lobby" && duel.players.has(player))) { await save(duel); broadcast(room); }  // (in the lobby: they're back)
@@ -287,9 +293,9 @@ async function handle(req, res) {
     if (duel.setReady(player, !!msg.ready, now)) setTimeout(() => broadcast(room), duel.startsAt - now + 10);
   } else if (action === "rematch") {
     if (!duel.players.has(player)) throw new DuelError("not in this duel");
-    // first one to ask picks the puzzle, and compete or collab (unsaid: as this round); everyone else is pointed at the same duel
+    // first one to ask picks the puzzle, and compete or collab (unsaid: as this round); everyone else is asked to accept it
     if (!duel.next) {
-      room.rematch ??= createDuel(msg.puzzle, duel.room, { mode: msg.mode, collab: msg.collab ?? duel.collab, avoid: [...(Array.isArray(msg.avoid) ? msg.avoid : []), duel.puzzle.secret] }).then((id) => (duel.next = id)).finally(() => (room.rematch = null));
+      room.rematch ??= createDuel(msg.puzzle, duel.room, { mode: msg.mode, collab: msg.collab ?? duel.collab, avoid: [...(Array.isArray(msg.avoid) ? msg.avoid : []), duel.puzzle.secret] }).then((id) => { duel.next = id; duel.nextBy = player; }).finally(() => (room.rematch = null));
       await room.rematch;
     }
   } else if (action === "hint") {
@@ -327,6 +333,7 @@ async function handle(req, res) {
   }
   await save(duel);
   broadcast(room);
+  if (action === "join") broadcastBefore(room);
   // the caller's own view comes back too, so a stalled event stream can't strand them
   return json(res, 200, { ok: true, view: viewOf(room, player, Date.now()) });
 }
@@ -345,13 +352,14 @@ setInterval(() => {
       if (!room.gone.has(id)) room.gone.set(id, now);
       else if (now - room.gone.get(id) > LOBBY_GONE_MS && room.duel.leave(id, now)) { room.gone.delete(id); dropped = true; }
     }
-    if (dropped) save(room.duel).then(() => broadcast(room), console.error);
+    if (dropped) save(room.duel).then(() => (broadcast(room), broadcastBefore(room)), console.error);
   }
 }, 5_000).unref();
 
-// Drop idle duels from memory; they stay on disk.
+// Drop idle duels from memory; they stay on disk. (Not a rematch whose finished round is still open: its summary shows it.)
 setInterval(() => {
-  for (const [id, r] of rooms) if (r.listeners.size === 0) rooms.delete(id);
+  const shown = new Set([...rooms.values()].filter((r) => r.listeners.size).map((r) => r.duel.next));
+  for (const [id, r] of rooms) if (r.listeners.size === 0 && !shown.has(id)) rooms.delete(id);
 }, 3600_000).unref();
 
 http

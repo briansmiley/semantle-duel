@@ -27,6 +27,7 @@ export class Duel {
     /** @type {number|null} */ this.startsAt = null;
     this.createdAt = now;
     /** @type {string|null} the rematch duel, once someone asks for one */ this.next = null;
+    /** @type {string|null} who asked for it: everyone else is asked to accept */ this.nextBy = null;
     /** @type {{id:string, name:string}|null} whoever set the word (a "set" duel): watches, sees every word, doesn't play */ this.setter = null;
     /** the room: the first duel's id, kept by every rematch after it; its link always opens the latest round */ this.room = id;
     /** @type {Pause[]} */ this.pauses = [];
@@ -280,8 +281,11 @@ export class Duel {
     if (open && [...this.players.values()].every((q) => q.finish)) open.to = now;
   }
 
-  /** What one viewer may see: everything once they've finished (or it's over), otherwise only scores of others. */
-  viewFor(viewerId, now) {
+  /**
+   * What one viewer may see: everything once they've finished (or it's over), otherwise only scores of others.
+   * `after`: the rematch duel, if at hand, for what it is and who has gone into it.
+   */
+  viewFor(viewerId, now, after = null) {
     const status = this.status(now);
     const reveal = status === "over" || !!this.players.get(viewerId)?.finish || this.setter?.id === viewerId;
     const ended = status === "over" ? this.endedAt() : now;
@@ -303,7 +307,11 @@ export class Duel {
       giveUpAsks: status === "playing" ? this.giveUpAsks.filter((id) => !this.players.get(id)?.finish) : [],
       secret: reveal ? this.puzzle.secret : null,
       max: MAX_PLAYERS,
-      next: this.next,
+      next: this.next && {
+        id: this.next,
+        by: this.nextBy,
+        ...(after && { collab: after.collab, mode: after.puzzle.mode ?? "semantle", number: after.puzzle.number, players: [...after.players.values()].map((p) => ({ id: p.id, name: p.name })) }),
+      },
       room: this.room,
       you: viewerId,
       players: [...this.players.values()].map((p) => ({
@@ -329,7 +337,7 @@ export class Duel {
   }
 
   toJSON() {
-    return { id: this.id, puzzle: this.puzzle, players: [...this.players.values()], startsAt: this.startsAt, createdAt: this.createdAt, next: this.next, room: this.room, setter: this.setter, pauses: this.pauses, seen: this.seen, hintAsks: this.hintAsks, collab: this.collab, giveUpAsks: this.giveUpAsks };
+    return { id: this.id, puzzle: this.puzzle, players: [...this.players.values()], startsAt: this.startsAt, createdAt: this.createdAt, next: this.next, nextBy: this.nextBy, room: this.room, setter: this.setter, pauses: this.pauses, seen: this.seen, hintAsks: this.hintAsks, collab: this.collab, giveUpAsks: this.giveUpAsks };
   }
 
   static fromJSON(o) {
@@ -337,6 +345,7 @@ export class Duel {
     for (const p of o.players) d.players.set(p.id, { finish: null, ...p });
     d.startsAt = o.startsAt;
     d.next = o.next ?? null;
+    d.nextBy = o.nextBy ?? null;
     d.room = o.room ?? o.id;
     d.setter = o.setter ?? null;
     d.pauses = o.pauses ?? [];
