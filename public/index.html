@@ -1382,7 +1382,8 @@ function duelPage(id) {
         + `<path class="brk" d="M${L - 5} ${m + 2}L${L + 1} ${m - 4}M${L - 1} ${m + 4}L${L + 5} ${m - 2}"/>`;
     }
     for (let y = yLo; y <= yHi; y += yStep) marks += `<line class="${y === 0 ? "zero" : "rule"}" x1="${L}" x2="${W - R}" y1="${sy(y)}" y2="${sy(y)}"/><text x="${L - 5}" y="${+sy(y) + 4}" text-anchor="end">${y}</text>`;
-    for (let x = Math.ceil(xLo / xStep) * xStep; x <= xHi; x += xStep) marks += `<text x="${sx(x)}" y="${H - 5}" text-anchor="middle">${byTime ? mmss(x) : x}</text>`;
+    // the origin goes unmarked, on either axis: the first tick is a step past it
+    for (let x = Math.floor(xLo / xStep) * xStep + xStep; x <= xHi; x += xStep) marks += `<text x="${sx(x)}" y="${H - 5}" text-anchor="middle">${byTime ? mmss(x) : x}</text>`;
     // labels in the gutter, pushed a line apart where the lines crowd (they're often a point or two apart), then
     // back up if that ran them off the bottom
     const tags = lines.map(([y, rank, label]) => ({ y: +sy(y), at: +sy(y), label, c: `hsl(${Math.round((rank / 1000) * 125)} 68% 46%)` }))  // as proximity() colours its bar
