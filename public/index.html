@@ -517,8 +517,6 @@ function openList(rooms) {
   ))));
 }
 
-// Going into a rematch while in voice: the rematch's page joins voice by itself (set by the duel page).
-let intoRematch = () => {};
 const VOICE_INTO = "sd-voice-into";  // sessionStorage: "<duel id>|<when>": this tab was in voice, heading into (or reloading) that duel
 
 // Propose a rematch of a finished duel on this puzzle; whoever asks first sets it up, and the others are asked
@@ -1076,7 +1074,6 @@ function duelPage(id) {
   const carry = (into) => { try { if (voice.state.status === "on") sessionStorage.setItem(VOICE_INTO, `${into}|${Date.now()}`); } catch {} };
   addEventListener("pagehide", () => { try { if (!sessionStorage.getItem(VOICE_INTO)) carry(id); } catch {} });
   const voice = voiceChat(base, () => view && voiceBar(view));
-  intoRematch = carry;
   let rejoinVoice = false;  // join once we're a player here
   try {
     const [into, at] = (sessionStorage.getItem(VOICE_INTO) ?? "").split("|");
@@ -1314,7 +1311,7 @@ function duelPage(id) {
     if (v.next) {
       // proposed: the proposer waits here for the others, who accept it (or not) when they're ready
       const n = v.next, names = (ps) => ps.map((p) => p.name).join(", ");
-      const go = (label, cls) => { const a = el("a", { href: `/d/${v.room}`, class: cls }, label); a.onclick = () => intoRematch(n.id); return a; };
+      const go = (label, cls) => { const a = el("a", { href: `/d/${v.room}`, class: cls }, label); a.onclick = () => carry(n.id); return a; };
       const what = `${"collab" in n ? (n.collab ? "co-op" : "compete") + " " : ""}rematch${n.mode === "random" ? " on a random word" : n.number === today ? " on today’s" : n.number ? ` on #${n.number}` : ""}`;
       const gone = (n.players ?? []).filter((p) => p.id !== me);
       if (n.players?.some((p) => p.id === me)) kids.push(el("span", {}, "you’re in the rematch"), go("go →", "lead"));
