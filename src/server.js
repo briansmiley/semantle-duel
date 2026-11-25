@@ -279,6 +279,7 @@ async function handle(req, res) {
     duel.join(player, msg.name, now);
   } else if (action === "stand") {
     if (!duel.leave(player, now)) throw new DuelError("not in the lobby");  // out of the lobby, to watch
+    room.voice.delete(player);  // and out of voice, which is for the players
   } else if (action === "giveup") {
     duel.giveUp(player, now);
   } else if (action === "askgiveup") {

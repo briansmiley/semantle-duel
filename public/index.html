@@ -533,13 +533,9 @@ async function rematch(id, puzzle, button, mode, collab) {
   if (r.view?.next) { intoRematch(r.view.next); location.href = `/d/${r.view.room ?? r.view.next}`; } else button.disabled = false;
 }
 
-// Rooms this browser made.
-const made = () => { try { return JSON.parse(store.get("sd-rooms-made")) || []; } catch { return []; } };
-
 async function newDuel(puzzle, button, extra = {}) {
   button.disabled = true;
   const r = await post("/duels", { puzzle, ...extra });
-  if (r.id) store.set("sd-rooms-made", JSON.stringify([r.id, ...made()].slice(0, 50)));
   if (r.id) location.href = `/d/${r.id}`; else button.disabled = false;
   return r;
 }
@@ -1007,7 +1003,7 @@ function duelPage(id) {
   const savedName = store.get("sd-name");
   // Sat down on the first view: in the lobby, or to refresh your name if you're already in. Mid-game you start out watching.
   let greeted = false;
-  let stood = false;  // stood up to watch: only "sit" sits you again
+  let stood = false;  // stood up to watch: from then on only "sit" (or Enter in the name box) sits you
   if (savedName) { $("#name").value = savedName; $("#latename").value = savedName; }
   $("#watch").onsubmit = async (e) => {
     e.preventDefault();
@@ -1044,7 +1040,12 @@ function duelPage(id) {
     store.set("sd-name", name);
     join(name).then((r) => r.view && apply(r.view));
   };
-  $("#mine .standbtn").onclick = () => { stood = true; post(`${base}/stand`, { player: me }).then((r) => r.view && apply(r.view)); };
+  // Standing up takes you out of voice too (the server has done its side): it's for the players, and its bar goes with your seat.
+  $("#mine .standbtn").onclick = () => {
+    stood = true;
+    clearTimeout(naming);  // a rename still on its way would sit you back down
+    post(`${base}/stand`, { player: me }).then((r) => { if (r.view) { voice.leave(false); apply(r.view); } });
+  };
   // Your name in the list follows the box as you type; everyone else sees it once you pause.
   let naming = null;
   $("#name").oninput = () => {
