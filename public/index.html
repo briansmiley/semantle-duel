@@ -188,10 +188,13 @@
   #after .pick span { color: var(--faint); }
   /* the rematch's puzzle choices read like the co-op toggle: faint until hovered, the picked one lit and underlined */
   #after .pick button, #after .pick a { color: var(--faint); border-bottom-color: transparent; }
-  #after .pick button:not(:disabled):hover, #after .pick a:hover, #after .modes button:not(:disabled):hover { color: var(--ink); }
+  @media (hover: hover) { #after .pick button:not(:disabled):hover, #after .pick a:hover, #after .modes button:not(:disabled):hover { color: var(--ink); } }  /* no sticky hover after a tap */
   #after .pick [aria-pressed="true"] { color: var(--ink); border-bottom-color: var(--hot); }
   #after .pick button:disabled { cursor: default; }
   #after .row { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: baseline; gap: .6rem 1.6rem; }  /* the rematch picker: a row of its own */
+  #after .row .pick { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: .6rem 1.6rem; }
+  /* a phone: compete / co-op on one line, the three puzzles on the next, no bar between */
+  @media (max-width: 640px) { #after .row .pick { flex-basis: 100%; gap: .6rem 1.2rem; } #after .row .pick > span[aria-hidden] { display: none; } }
   #tally { margin: .3rem 0 .6rem; color: var(--faint); font-size: .95rem; display: grid; gap: .15rem; }
   #tally b { font-weight: 400; color: var(--ink); }
   #tally .lead b { color: var(--hot); }
