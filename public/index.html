@@ -237,11 +237,12 @@
   li .w { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* with a tag (hint, after): the word takes the ellipsis, not the tag */
   li .w:has(small) { display: flex; align-items: baseline; }
-  li .w .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  li .w .t { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; }  /* a box with or without a tag, so cutOf can measure it */
   /* the word takes its full width first; the tag has what's left, and once that's less than the whole tag it snaps to
      its first letter ("h"), the rest wrapping onto a line that's hidden. Only then is the word cut. */
   li .w:has(small) .t { flex: 0 1 auto; }
   li .w:has(small) small { flex: 1 1 0; min-width: .8em; display: inline-flex; flex-wrap: wrap; max-height: 1.3em; overflow: hidden; }
+  #cut { position: fixed; z-index: 30; max-width: 90vw; padding: .25em .6em; background: var(--ink); color: var(--paper); border-radius: 4px; font-size: .9rem; pointer-events: none; }
   li .w.hidden, .chip .w.hidden { filter: blur(5px); user-select: none; color: var(--faint); }
   li .s { text-align: right; }
   li .p { font-size: .85em; white-space: nowrap; }
@@ -1660,6 +1661,42 @@ const GRAPH_COLORS = ["--hot", "--cool", "--ink", "--warm"], GRAPH_DASHES = ["",
 function tag(t) {
   return el("small", {}, el("span", {}, t[0]), el("span", {}, t.slice(1)));
 }
+
+// A word (or co-op name) in a guess row that the row cut short with an ellipsis: its element and full text. Never a
+// hidden word, which must not give itself away.
+function cutOf(target) {
+  const cell = target.closest?.("li .w:not(.hidden), li .by");
+  const e = cell?.querySelector(".t") ?? cell;
+  return e && e.scrollWidth > e.clientWidth ? { e, text: e.textContent } : null;
+}
+// A cut word's full text floats near it: while a mouse hovers it, or after a tap (touch/pen) until the next tap, scroll or 2s.
+// The tap is a pointerup, not a click: an iPhone sends no click for a tap on plain text. A mouse is driven by hover alone.
+let cutTip, cutTimer;
+function hideCut() { cutTip?.remove(); cutTip = null; clearTimeout(cutTimer); }
+function showCut(c, ms) {
+  hideCut();
+  const r = c.e.getBoundingClientRect();
+  cutTip = el("div", { id: "cut" }, c.text);
+  cutTip.cutEl = c.e;
+  document.body.append(cutTip);
+  cutTip.style.left = `${Math.max(4, Math.min(r.left, innerWidth - cutTip.offsetWidth - 4))}px`;
+  cutTip.style.top = `${r.top - cutTip.offsetHeight - 4 < 4 ? r.bottom + 4 : r.top - cutTip.offsetHeight - 4}px`;
+  if (ms) cutTimer = setTimeout(hideCut, ms);
+}
+addEventListener("pointerover", (e) => {
+  const c = e.pointerType === "mouse" && cutOf(e.target);
+  if (c && cutTip?.cutEl !== c.e) showCut(c);
+});
+addEventListener("pointerout", (e) => {
+  if (e.pointerType === "mouse" && cutTip && cutOf(e.relatedTarget ?? document.body)?.e !== cutTip.cutEl) hideCut();
+});
+addEventListener("pointerup", (e) => {
+  if (e.pointerType === "mouse") return;
+  const c = cutOf(e.target), same = c && cutTip?.cutEl === c.e;
+  hideCut();
+  if (c && !same) showCut(c, 2000);
+});
+addEventListener("scroll", hideCut, true);
 
 // A guess's word. One you may not see yet is a run of x's to blur, the same length each time it's drawn.
 function wordOf(g, p, ...kids) {
