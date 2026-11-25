@@ -277,6 +277,8 @@ async function handle(req, res) {
     duel.setPaused(player, !!msg.paused, now);
   } else if (action === "join") {
     duel.join(player, msg.name, now);
+  } else if (action === "stand") {
+    if (!duel.leave(player, now)) throw new DuelError("not in the lobby");  // out of the lobby, to watch
   } else if (action === "giveup") {
     duel.giveUp(player, now);
   } else if (action === "askgiveup") {

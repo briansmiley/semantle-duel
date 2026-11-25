@@ -117,6 +117,9 @@
   #mine { display: inline-flex; align-items: baseline; gap: .3em; }
   #mine input { font-size: inherit; width: 8em; }
   #mine .joinbtn { margin-left: .5em; border-bottom: 2px solid var(--hot); padding-bottom: 1px; }
+  #mine .spectating { margin-left: .5em; color: var(--faint); font-style: italic; font-size: .8em; }
+  #mine .standbtn { margin-left: .5em; color: var(--faint); font-size: .7em; }
+  #mine .standbtn:hover { color: var(--ink); }
   #mine .pencil { color: var(--faint); align-self: center; display: grid; }
   #mine .pencil:hover { color: var(--ink); }
   #mine .pencil svg { width: .8em; height: .8em; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
@@ -361,13 +364,13 @@
     <button id="share" title="copy link">copy link</button>
   </header>
   <div id="voice" hidden></div>
-  <form id="watch" hidden><span>you’re watching.</span><input class="line" id="latename" placeholder="your name" maxlength="24" autocomplete="off"><button class="go">join in</button></form>
+  <form id="watch" hidden><span>you’re watching.</span><input class="line" id="latename" placeholder="your name" maxlength="24" autocomplete="off"><button class="go">sit in</button></form>
   <div id="banner" hidden></div>
   <nav id="after" hidden></nav>
   <div id="tally" hidden></div>
   <div id="graph" hidden></div>
   <section id="lobby" hidden>
-    <div class="who"><span id="mine"><form id="nameform"><input class="line" id="name" placeholder="your name" maxlength="24" autocomplete="off"></form><span class="me"></span><button type="button" class="pencil" title="change your name" aria-label="change your name"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4"/></svg></button><button type="button" class="joinbtn">join</button></span><span class="others"></span></div>
+    <div class="who"><span id="mine"><form id="nameform"><input class="line" id="name" placeholder="your name" maxlength="24" autocomplete="off"></form><span class="me"></span><button type="button" class="pencil" title="change your name" aria-label="change your name"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4"/></svg></button><button type="button" class="standbtn">stand up</button><span class="spectating">spectating</span><button type="button" class="joinbtn">sit</button></span><span class="others"></span></div>
     <div class="mode"></div>
     <div><button id="go" disabled>ready</button><span class="wait"></span></div>
   </section>
@@ -530,7 +533,7 @@ async function rematch(id, puzzle, button, mode, collab) {
   if (r.view?.next) { intoRematch(r.view.next); location.href = `/d/${r.view.room ?? r.view.next}`; } else button.disabled = false;
 }
 
-// Rooms this browser made: opening one joins you, as does opening a room you've played in (but no other).
+// Rooms this browser made.
 const made = () => { try { return JSON.parse(store.get("sd-rooms-made")) || []; } catch { return []; } };
 
 async function newDuel(puzzle, button, extra = {}) {
@@ -1002,8 +1005,9 @@ function duelPage(id) {
 
   const join = (name) => post(`${base}/join`, { player: me, name });
   const savedName = store.get("sd-name");
-  // Joined on the first view: in the lobby, or to refresh your name if you're already in. Mid-game you start out watching.
+  // Sat down on the first view: in the lobby, or to refresh your name if you're already in. Mid-game you start out watching.
   let greeted = false;
+  let stood = false;  // stood up to watch: only "sit" sits you again
   if (savedName) { $("#name").value = savedName; $("#latename").value = savedName; }
   $("#watch").onsubmit = async (e) => {
     e.preventDefault();
@@ -1024,12 +1028,12 @@ function duelPage(id) {
   $("#mine .pencil").onclick = () => { editing = true; showMine(); $("#name").focus(); $("#name").select(); };
 
   const inNow = () => !!view?.players.some((p) => p.id === me);
-  let blurred = false;  // a submit from leaving the box only keeps the name; Enter (or "join") also joins
+  let blurred = false;  // having stood up, a submit from leaving the box only keeps the name; Enter (or "sit") also sits
   $("#nameform").onsubmit = (e) => {
     e.preventDefault();
     const name = $("#name").value.trim();
     if (!name) { const was = store.get("sd-name"); if (!was) return; $("#name").value = was; }
-    else { store.set("sd-name", name); if (inNow() || !blurred) join(name).then((r) => r.view && apply(r.view)); }
+    else { store.set("sd-name", name); if (inNow() || !blurred || !stood) join(name).then((r) => r.view && apply(r.view)); }
     editing = false; showMine();
     if (view) render();
   };
@@ -1040,6 +1044,7 @@ function duelPage(id) {
     store.set("sd-name", name);
     join(name).then((r) => r.view && apply(r.view));
   };
+  $("#mine .standbtn").onclick = () => { stood = true; post(`${base}/stand`, { player: me }).then((r) => r.view && apply(r.view)); };
   // Your name in the list follows the box as you type; everyone else sees it once you pause.
   let naming = null;
   $("#name").oninput = () => {
@@ -1125,9 +1130,8 @@ function duelPage(id) {
     const v = view;
     if (!greeted) {
       greeted = true;
-      // already in it, or a lobby of a room you made or have played in: in you go. Anywhere else, "join".
-      const known = made().includes(v.room) || myRooms().some((r) => r.room === v.room);
-      if (savedName && v.setter?.id !== me && (v.players.some((p) => p.id === me) || (v.status === "lobby" && known))) join(savedName);
+      // already in it, or a lobby with a seat: in you go. Mid-game, "sit in".
+      if (savedName && v.setter?.id !== me && (v.players.some((p) => p.id === me) || (v.status === "lobby" && v.players.length < v.max))) join(savedName);
     }
     remember(v);
     const setting = v.setter?.id === me;  // you set the word: you watch, seeing every word
@@ -1151,7 +1155,8 @@ function duelPage(id) {
       const tick = (p) => (p.ready ? el("span", { class: "ok", title: "ready" }, "✓") : "");
       const mine = v.players.find((p) => p.id === me);
       $("#mine").hidden = setting || (!mine && v.players.length >= v.max);
-      $("#mine .joinbtn").hidden = !!mine;
+      $("#mine .joinbtn").hidden = $("#mine .spectating").hidden = !!mine;
+      $("#mine .standbtn").hidden = !mine;
       $("#mine .me").replaceChildren($("#name").value.trim() || mine?.name || "", ...(mine ? [tick(mine)] : []));
       // someone whose page has closed: greyed, "away"; the server drops them if they don't come back soon
       const away = (p) => v.here && !v.here.includes(p.id);
@@ -1164,7 +1169,7 @@ function duelPage(id) {
       go.disabled = !mine;
       go.hidden = setting;
       go.classList.toggle("on", !!mine?.ready);
-      go.textContent = mine?.ready ? "not ready" : "ready";
+      go.textContent = mine?.ready ? "unready" : "ready";
       const unready = v.players.filter((p) => !p.ready && p.id !== me).map((p) => p.name);
       $("#lobby .wait").textContent = !mine?.ready ? ""
         : v.players.length < 2 ? "waiting for an opponent…"
