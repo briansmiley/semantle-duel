@@ -186,6 +186,7 @@
   #after .quiet { color: var(--faint); }
   #after .pick { display: contents; }
   #after .pick span { color: var(--faint); }
+  #after .row { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: baseline; gap: .6rem 1.6rem; }  /* the rematch picker: a row of its own */
   #tally { margin: .3rem 0 .6rem; color: var(--faint); font-size: .95rem; display: grid; gap: .15rem; }
   #tally b { font-weight: 400; color: var(--ink); }
   #tally .lead b { color: var(--hot); }
@@ -1331,12 +1332,12 @@ function duelPage(id) {
         b.onclick = async () => rematch(v.id, await puzzle(), b, undefined, collab).then((nv) => nv && apply(nv));
         return b;
       };
-      kids.push(modeToggle(collab, (c) => { nextCollab = c; render(); }), el("span", { class: "pick" },
-        el("span", {}, "rematch on"),
+      kids.push(el("div", { class: "row" }, modeToggle(collab, (c) => { nextCollab = c; render(); }), el("span", { class: "pick" },
+        el("span", { "aria-hidden": "true" }, "|"),
         (() => { const b = el("button", { type: "button" }, "a random word"); b.onclick = () => rematch(v.id, undefined, b, "random", collab).then((nv) => nv && apply(nv)); return b; })(),
         today && today !== v.number ? go("today’s", async () => today) : "",
         el("a", { href: `/archive?rematch=${v.id}&collab=${collab ? 1 : 0}` }, "the archive"),
-      ));
+      )));
     }
     if (v.status === "over" && v.players.some((p) => p.guesses.some((g) => !g.hint))) {
       const b = el("button", { type: "button", class: "quiet", "aria-expanded": String(chart.open) }, chart.open ? "hide graph" : "graph");
