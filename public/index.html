@@ -186,6 +186,11 @@
   #after .quiet { color: var(--faint); }
   #after .pick { display: contents; }
   #after .pick span { color: var(--faint); }
+  /* the rematch's puzzle choices read like the co-op toggle: faint until hovered, the picked one lit and underlined */
+  #after .pick button, #after .pick a { color: var(--faint); border-bottom-color: transparent; }
+  #after .pick button:not(:disabled):hover, #after .pick a:hover, #after .modes button:not(:disabled):hover { color: var(--ink); }
+  #after .pick [aria-pressed="true"] { color: var(--ink); border-bottom-color: var(--hot); }
+  #after .pick button:disabled { cursor: default; }
   #after .row { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: baseline; gap: .6rem 1.6rem; }  /* the rematch picker: a row of its own */
   #tally { margin: .3rem 0 .6rem; color: var(--faint); font-size: .95rem; display: grid; gap: .15rem; }
   #tally b { font-weight: 400; color: var(--ink); }
@@ -1304,6 +1309,22 @@ function duelPage(id) {
     box.replaceChildren(line1, ...(vs.length ? [el("span", {}, "you ", vs.join(" · "))] : []));
   }
 
+  // The rematch picker, a row of its own: compete or co-op | a random word, today's, the archive. Once proposed (`on`:
+  // which was picked), it's shown as it was left, nothing clickable, the pick lit, and `then` (the vote) after it.
+  function picker(v, collab, on, puzzle, then = []) {
+    const choice = (tag, label, key, propose) => {
+      const b = el(tag, tag === "a" && !on ? { href: propose } : { type: "button", "aria-pressed": String(on === key) }, label);
+      if (tag === "button") { b.disabled = !!on; if (!on) b.onclick = async () => { const [puzzle, mode] = await propose(); rematch(v.id, puzzle, b, mode, collab).then((nv) => nv && apply(nv)); }; }
+      return b;
+    };
+    return el("div", { class: "row" }, modeToggle(collab, on ? null : (c) => { nextCollab = c; render(); }), el("span", { class: "pick" },
+      el("span", { "aria-hidden": "true" }, "|"),
+      choice("button", "a random word", "random", async () => [undefined, "random"]),
+      today && (today !== v.number || on === "today") ? choice("button", "today’s", "today", async () => [today]) : "",
+      on ? (on === "archive" ? choice("button", `#${puzzle}`, "archive") : choice("button", "the archive", "")) : choice("a", "the archive", "", `/archive?rematch=${v.id}&collab=${collab ? 1 : 0}`),
+    ), ...then);
+  }
+
   // once you're done: rematch (same opponents, a puzzle of your choosing) or home
   function after(v, mine) {
     const nav = $("#after");
@@ -1316,28 +1337,22 @@ function duelPage(id) {
       const a = el("a", { href: `/d/${v.room}`, class: "lead" }, "on to the rematch →");
       a.onclick = () => carry(v.next);
       kids.push(a);
+    } else if (v.rematch && mine && v.rematch.by === me) {
+      // you proposed it: the picker stays as you left it, with your pick lit, and the vote after it
+      const r = v.rematch;
+      const on = r.mode === "random" ? "random" : !r.puzzle || r.puzzle === today ? "today" : "archive";
+      kids.push(picker(v, r.collab, on, r.puzzle, vote(v, r.asks, { action: "rematch", label: "rematch", asking: "rematch proposed", wants: "", voters: v.players })));
     } else if (v.rematch && mine) {
-      // proposed: a vote of this round's players, like a hint; the proposer cancelling withdraws it
+      // someone else proposed: a vote of this round's players, like a hint
       const r = v.rematch;
       const what = `${r.collab ? "co-op" : "compete"} rematch${r.mode === "random" ? " on a random word" : !r.puzzle || r.puzzle === today ? " on today’s" : ` on #${r.puzzle}`}`;
-      kids.push(...vote(v, r.asks, { action: "rematch", label: "rematch", asking: r.by === me ? `proposed a ${what}` : `said yes to a ${what}`, wants: `a ${what}`, voters: v.players }));
+      kids.push(...vote(v, r.asks, { action: "rematch", label: "rematch", asking: `said yes to a ${what}`, wants: `a ${what}`, voters: v.players }));
     } else if (mine && v.players.length > 1 && !picking) {
       const b = el("button", { class: "lead", type: "button" }, "rematch");
       b.onclick = () => { picking = true; render(); };
       kids.push(b);
     } else if (mine && v.players.length > 1) {
-      const collab = nextCollab ?? !!v.collab;  // as this round, unless changed
-      const go = (label, puzzle) => {
-        const b = el("button", { type: "button" }, label);
-        b.onclick = async () => rematch(v.id, await puzzle(), b, undefined, collab).then((nv) => nv && apply(nv));
-        return b;
-      };
-      kids.push(el("div", { class: "row" }, modeToggle(collab, (c) => { nextCollab = c; render(); }), el("span", { class: "pick" },
-        el("span", { "aria-hidden": "true" }, "|"),
-        (() => { const b = el("button", { type: "button" }, "a random word"); b.onclick = () => rematch(v.id, undefined, b, "random", collab).then((nv) => nv && apply(nv)); return b; })(),
-        today && today !== v.number ? go("today’s", async () => today) : "",
-        el("a", { href: `/archive?rematch=${v.id}&collab=${collab ? 1 : 0}` }, "the archive"),
-      )));
+      kids.push(picker(v, nextCollab ?? !!v.collab));  // as this round, unless changed
     }
     if (v.status === "over" && v.players.some((p) => p.guesses.some((g) => !g.hint))) {
       const b = el("button", { type: "button", class: "quiet", "aria-expanded": String(chart.open) }, chart.open ? "hide graph" : "graph");
