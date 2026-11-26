@@ -1131,8 +1131,10 @@ function duelPage(id) {
     const v = view;
     if (!greeted) {
       greeted = true;
-      // already in it, or a lobby with a seat: in you go. Mid-game, "sit in".
-      if (savedName && v.setter?.id !== me && (v.players.some((p) => p.id === me) || (v.status === "lobby" && v.players.length < v.max))) join(savedName);
+      // already in it (your name refreshed), or a lobby with a seat: in you go, named or not (a first visit names
+      // itself in the box, and can't ready until it does). Mid-game, "sit in".
+      const inIt = v.players.some((p) => p.id === me);
+      if (v.setter?.id !== me && (inIt ? savedName : v.status === "lobby" && v.players.length < v.max)) join(savedName ?? "");
     }
     remember(v);
     const setting = v.setter?.id === me;  // you set the word: you watch, seeing every word
@@ -1167,7 +1169,7 @@ function duelPage(id) {
       $("#lobby .mode").replaceChildren(modeToggle(v.collab, mine && ((collab) => post(`${base}/collab`, { player: me, collab }).then((r) => r.view && apply(r.view)))));
       // everyone says ready, then the countdown starts by itself
       const go = $("#go");
-      go.disabled = !mine;
+      go.disabled = !mine || !store.get("sd-name");  // seated before you've named yourself: name first, then ready
       go.hidden = setting;
       go.classList.toggle("on", !!mine?.ready);
       go.textContent = mine?.ready ? "unready" : "ready";
