@@ -1145,7 +1145,7 @@ function duelPage(id) {
     seen = null; draft = ""; pending = []; recall = null; flashRecall = false; note = null;
     picking = false; nextCollab = null; openRival = null;
     editing = !store.get("sd-name"); showMine();
-    chart = { open: false, x: "t", avg: false, hide: new Set(), picking: false };
+    chart = { open: false, x: "t", y: "best", hide: new Set(), picking: false };
     hideCut();
     $("#board").replaceChildren();
     for (const s of ["#board", "#rivals", "#banner", "#after", "#graph"]) $(s).hidden = true;  // till the new round's first view
