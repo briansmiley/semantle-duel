@@ -219,7 +219,14 @@ async function handle(req, res) {
   if (req.method === "GET" && action === "tally") {
     const rounds = [];
     for (let r = await loadRoom(duel.room); r && rounds.length < 1000; r = r.duel.next ? await loadRoom(r.duel.next) : null) rounds.push(r.duel);
-    return json(res, 200, tally(rounds, Date.now()));
+    const now = Date.now();
+    // and its finished rounds but this one, for the page's list of them: which word, when, how it went
+    const past = rounds.map((d, i) => ({ d, n: i + 1 })).filter(({ d }) => d.id !== duel.id && d.status(now) === "over").map(({ d, n }) => {
+      const found = [...d.players.values()].filter((p) => p.finish?.found).sort((a, b) => a.finish.at - b.finish.at);
+      return { id: d.id, n, number: d.puzzle.number, secret: d.puzzle.secret, collab: d.collab, start: d.startsAt,
+        winner: found[0] ? { id: found[0].id, name: found[0].name, time: d.elapsed(found[0].finish.at) } : null };
+    });
+    return json(res, 200, { ...tally(rounds, now), past });
   }
 
   if (req.method === "GET" && action === "events") {

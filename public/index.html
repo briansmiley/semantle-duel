@@ -202,6 +202,10 @@
   #tally { margin: .3rem 0 .6rem; color: var(--faint); font-size: .95rem; display: grid; gap: .15rem; }
   #tally b { font-weight: 400; color: var(--ink); }
   #tally .lead b { color: var(--hot); }
+  #tally .more { color: inherit; border-bottom: 1px dotted currentColor; }
+  #tally .rounds { list-style: none; margin: .1rem 0 0; padding: 0; display: grid; gap: .1rem; }
+  #tally .rounds li { display: block; padding: 0; border: 0; }
+  #tally .rounds a { color: var(--ink); }
   #graph { margin: .3rem 0 .8rem; max-width: 40rem; color: var(--faint); font-size: .95rem; }
   #graph .opts { display: flex; flex-wrap: wrap; align-items: baseline; gap: .2rem 1.4rem; }
   #graph .key { display: inline-block; width: 22px; margin-right: .3em; }
@@ -410,6 +414,7 @@ const store = {
 try { localStorage.removeItem("sd-duels"); localStorage.removeItem("sd-made"); } catch {}
 const me = store.get("sd-player") || (() => { const id = crypto.randomUUID?.() ?? [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join(""); store.set("sd-player", id); return id; })();
 const path = location.pathname.split("/").filter(Boolean);
+const pinned = new URLSearchParams(location.search).has("round");  // a duel page opened with ?round: just that round
 
 // Never throws: a dropped or stalled request comes back as { ok: false } after 15s at most.
 async function post(url, data) {
@@ -999,8 +1004,7 @@ async function archivePage() {
 
 /* ---------- duel ---------- */
 // /d/<room> opens the room's latest round (unless you're still racing an earlier one); ?round opens just that one,
-// and stays on it once its rematch is made, with a link on to it.
-const pinned = new URLSearchParams(location.search).has("round");
+// and stays on it once its rematch is made, with a link on to it. (pinned is set up top: the pages open before here)
 async function openDuel(code) {
   let id = code;
   if (!pinned) {
@@ -1350,6 +1354,7 @@ function duelPage(id) {
 
   // The room's record so far, between rounds and once you've finished: wins, and how you stand against each other player.
   let book = null, booked = null;  // the tally, and the duel and status it was fetched for
+  let roundsOpen = false;  // its list of the room's earlier rounds, open
   function record(v, mine) {
     const box = $("#tally");
     const when = `${v.id}:${v.status}`;
@@ -1357,11 +1362,16 @@ function duelPage(id) {
       booked = when;
       fetch(`${base}/tally`).then((r) => r.json()).then((t) => { book = t; if (view) record(view, view.players.find((p) => p.id === me)); }).catch(() => {});
     }
-    box.hidden = !(book?.rounds || book?.together) || !(v.status === "lobby" || v.status === "over" || mine?.finish);
+    const past = book?.past ?? [];
+    box.hidden = !(book?.rounds || book?.together || past.length) || !(v.status === "lobby" || v.status === "over" || mine?.finish);
     if (box.hidden) return;
     const ps = Object.entries(book.players).sort(([, a], [, b]) => b.wins - a.wins || b.played - a.played);
     const top = ps[0]?.[1].wins;
-    const line1 = el("span", {}, book.rounds ? `this room · ${book.rounds} ${book.rounds === 1 ? "round" : "rounds"}: ` : "this room",
+    // "this room · N rounds" opens the list of its earlier rounds, each a link to that round as it ended
+    const head = book.rounds ? `this room · ${book.rounds} ${book.rounds === 1 ? "round" : "rounds"}` : "this room";
+    const toggle = past.length ? el("button", { type: "button", class: "more", "aria-expanded": String(roundsOpen) }, head, roundsOpen ? " ▴" : " ▾") : head;
+    if (past.length) toggle.onclick = () => { roundsOpen = !roundsOpen; record(view, view.players.find((p) => p.id === me)); };
+    const line1 = el("span", {}, toggle, book.rounds ? ": " : "",
       ...ps.flatMap(([id, p], i) => [i ? " · " : "", el("span", { class: top && p.wins === top ? "lead" : "" }, el("b", {}, id === me ? "you" : p.name), ` ${p.wins}`)]),
       ...(book.together ? [" · ", el("b", {}, `${book.together}`), " solved together"] : []));
     const vs = ps.filter(([id]) => id !== me).map(([id, p]) => {
@@ -1371,7 +1381,15 @@ function duelPage(id) {
       const [w, l] = flip ? [h[1], h[0]] : h;
       return `vs ${p.name} ${w}–${l}`;
     }).filter(Boolean);
-    box.replaceChildren(line1, ...(vs.length ? [el("span", {}, "you ", vs.join(" · "))] : []));
+    const list = roundsOpen && past.length ? el("ol", { class: "rounds" },
+      ...[...past].reverse().map((r) => el("li", {},
+        el("a", { href: `/d/${r.id}?round` }, `round ${r.n}`),
+        ` · ${r.number ? `#${r.number} · ` : ""}${r.secret} · ${startedAt(r.start)} · `,
+        r.collab ? (r.winner ? "solved together" : "not solved")
+        : r.winner ? el("span", { class: r.winner.id === me ? "lead" : "" }, el("b", {}, r.winner.id === me ? "you" : r.winner.name), ` won in ${mmss(r.winner.time)}`)
+        : "nobody found it")),
+      ...(pinned ? [el("li", {}, el("a", { href: `/d/${v.room ?? v.id}` }, "the room now →"))] : [])) : null;  // a ?round page: back to the latest
+    box.replaceChildren(line1, ...(vs.length ? [el("span", {}, "you ", vs.join(" · "))] : []), ...(list ? [list] : []));
   }
 
   // The rematch picker, a row of its own: compete or co-op | a random word, today's, the archive. Once proposed (`on`:
