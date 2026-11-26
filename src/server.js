@@ -151,7 +151,8 @@ async function createDuel(which, room = null, { mode, word, setter, avoid, colla
   let pick;
   if (word !== undefined) {
     const w = String(word).trim().toLowerCase();
-    if (!/^[a-z][a-z'-]*$/.test(w) || !(await knows(w))) throw new DuelError("Semantle doesn’t know that word");
+    if (!/^[a-z][a-z'-]*$/.test(w)) throw new DuelError("one word, letters only");
+    if (!(await knows(w))) throw new DuelError("Semantle doesn’t know that word");
     pick = { number: null, secret: w, mode: "set" };
   } else if (mode === "random") {
     const skip = new Set(Array.isArray(avoid) ? avoid.slice(0, 500).map(String) : []);
