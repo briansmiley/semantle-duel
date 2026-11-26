@@ -1315,7 +1315,7 @@ function duelPage(id) {
     const mine = v.players.find((p) => p.id === me);
     const banner = $("#banner");
     const raced = !v.collab && v.players.length > 1;
-    const winner = raced && !mine?.finish && v.status === "playing" ? standings(v).find((p) => p.finish.found) : null;
+    const winner = raced && mine && !mine.finish && v.status === "playing" ? standings(v).find((p) => p.finish.found) : null;
     banner.hidden = !mine?.finish && !winner;
     if (winner) {
       const places = standings(v).filter((p) => p.finish.found).length;
