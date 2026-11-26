@@ -174,7 +174,7 @@ async function createDuel(which, room = null, { mode, word, setter, avoid, colla
 
 // Google's word2vec, which Semantle scores with, left out just these four common words: no score exists for them.
 const UNSCORED = new Set(["a", "and", "of", "to"]);
-const unknown = (word) => (UNSCORED.has(word) ? "semantle skips it" : "unknown word");
+const unknown = (word) => (UNSCORED.has(word) ? "too common to score" : "unknown word");
 
 async function handle(req, res) {
   const url = new URL(req.url, "http://x");
