@@ -1314,12 +1314,17 @@ function duelPage(id) {
     // your own result, once you have one
     const mine = v.players.find((p) => p.id === me);
     const banner = $("#banner");
-    banner.hidden = !mine?.finish;
-    if (mine?.finish) {
+    const raced = !v.collab && v.players.length > 1;
+    const winner = raced && !mine?.finish && v.status === "playing" ? standings(v).find((p) => p.finish.found) : null;
+    banner.hidden = !mine?.finish && !winner;
+    if (winner) {
+      const places = standings(v).filter((p) => p.finish.found).length;
+      banner.textContent = `${winner.name} found it · ${mmss(winner.finish.time)}. racing for ${ordinal(places + 1)}`;
+    } else if (mine?.finish) {
       const n = v.collab ? v.players.reduce((sum, p) => sum + p.guesses.length, 0) : mine.guesses.length;
       const finder = v.collab ? v.players.find((p) => p.guesses.some((g) => g.word === v.secret)) : mine;
       banner.replaceChildren(...(mine.finish.found
-        ? [`${finder?.id === me ? "you" : finder?.name ?? "the room"} found `, el("b", {}, v.secret), " in ", el("span", { class: "num" }, `${n}`), n === 1 ? " guess" : " guesses"]
+        ? [`${raced ? ordinal(standings(v).indexOf(mine) + 1) + ": " : ""}${finder?.id === me ? "you" : finder?.name ?? "the room"} found `, el("b", {}, v.secret), " in ", el("span", { class: "num" }, `${n}`), n === 1 ? " guess" : " guesses"]
         : [v.collab ? "the room gave up. it was " : "you gave up. it was ", el("b", {}, v.secret)]));
     }
     after(v, mine);
