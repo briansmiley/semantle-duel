@@ -202,7 +202,7 @@
   #tally { margin: .3rem 0 .6rem; color: var(--faint); font-size: .95rem; display: grid; gap: .15rem; }
   #tally b { font-weight: 400; color: var(--ink); }
   #tally .lead b { color: var(--hot); }
-  #tally .more { color: inherit; border-bottom: 1px dotted currentColor; }
+  #tally .more { border-bottom: 1px dotted currentColor; }
   #tally .rounds { list-style: none; margin: .1rem 0 0; padding: 0; display: grid; gap: .1rem; }
   #tally .rounds li { display: block; padding: 0; border: 0; }
   #tally .rounds a { color: var(--ink); }
@@ -463,7 +463,8 @@ function myRooms() {
     r.at = Math.max(r.at, d.at);
     if (d.status !== "lobby") r.rounds.push(d);  // a round that never started isn't history
   }
-  for (const r of by.values()) r.rounds.sort((a, b) => b.at - a.at);
+  // by when each began, not when this browser last saw it: looking back at an earlier round doesn't make it the latest
+  for (const r of by.values()) r.rounds.sort((a, b) => (b.start ?? b.at) - (a.start ?? a.at));
   return [...by.values()].sort((a, b) => b.at - a.at);
 }
 
@@ -479,7 +480,7 @@ async function roomsNow() {
     const m = merged.get(key);
     if (!m) return merged.set(key, { ...r, room: h?.room ?? r.room, others: new Set(r.others), h });
     r.others.forEach((n) => m.others.add(n));
-    m.rounds = [...m.rounds, ...r.rounds].sort((a, b) => b.at - a.at);
+    m.rounds = [...m.rounds, ...r.rounds].sort((a, b) => (b.start ?? b.at) - (a.start ?? a.at));
     m.at = Math.max(m.at, r.at);
   });
   return [...merged.values()].sort((a, b) => b.at - a.at);
@@ -1362,7 +1363,7 @@ function duelPage(id) {
       booked = when;
       fetch(`${base}/tally`).then((r) => r.json()).then((t) => { book = t; if (view) record(view, view.players.find((p) => p.id === me)); }).catch(() => {});
     }
-    const past = book?.past ?? [];
+    const past = (book?.past ?? []).filter((r) => r.id !== v.id);  // the room's finished rounds, but the one on screen
     box.hidden = !(book?.rounds || book?.together || past.length) || !(v.status === "lobby" || v.status === "over" || mine?.finish);
     if (box.hidden) return;
     const ps = Object.entries(book.players).sort(([, a], [, b]) => b.wins - a.wins || b.played - a.played);
@@ -1370,7 +1371,7 @@ function duelPage(id) {
     // "this room · N rounds" opens the list of its earlier rounds, each a link to that round as it ended
     const head = book.rounds ? `this room · ${book.rounds} ${book.rounds === 1 ? "round" : "rounds"}` : "this room";
     const toggle = past.length ? el("button", { type: "button", class: "more", "aria-expanded": String(roundsOpen) }, head, roundsOpen ? " ▴" : " ▾") : head;
-    if (past.length) toggle.onclick = () => { roundsOpen = !roundsOpen; record(view, view.players.find((p) => p.id === me)); };
+    if (past.length) toggle.onclick = () => { roundsOpen = !roundsOpen; record(v, mine); };  // (v, not view: there is none while the page moves on to a rematch)
     const line1 = el("span", {}, toggle, book.rounds ? ": " : "",
       ...ps.flatMap(([id, p], i) => [i ? " · " : "", el("span", { class: top && p.wins === top ? "lead" : "" }, el("b", {}, id === me ? "you" : p.name), ` ${p.wins}`)]),
       ...(book.together ? [" · ", el("b", {}, `${book.together}`), " solved together"] : []));

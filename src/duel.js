@@ -388,23 +388,27 @@ export class Duel {
  * A room's record over its finished rounds: each player's wins (found it first) and rounds played,
  * and for each pair who played the same round, who placed higher (finding it beats giving up; a faster
  * find beats a slower one; both giving up counts for neither). Co-op rounds are in none of that: they only
- * add to `together`, the words the room has solved as a room.
+ * add to `together`, the words the room has solved as a room. `past` is those finished rounds themselves, co-op
+ * too, for the page's list of them: which round of the room, its word, when it started, who found it first.
  * @param {Duel[]} rounds in order
- * @returns {{rounds:number, together:number, players:Record<string,{name:string, wins:number, played:number}>, h2h:Record<string,[number,number]>}}
+ * @returns {{rounds:number, together:number, players:Record<string,{name:string, wins:number, played:number}>, h2h:Record<string,[number,number]>,
+ *   past:{id:string, n:number, number:number|null, secret:string, collab:boolean, start:number, winner:{id:string, name:string, time:number}|null}[]}}
  *   h2h is keyed "a|b" with a < b: [a's wins, b's wins]
  */
 export function tally(rounds, now) {
-  const players = {}, h2h = {};
+  const players = {}, h2h = {}, past = [];
   let n = 0, together = 0;
-  for (const d of rounds) {
-    if (d.status(now) !== "over") continue;
+  for (const [i, d] of rounds.entries()) {
+    if (d.status(now) !== "over") continue;  // (so a round still running never gives its word to `past`)
     const ps = [...d.players.values()];
+    const found = ps.filter((p) => p.finish?.found).sort((a, b) => a.finish.at - b.finish.at);
+    past.push({ id: d.id, n: i + 1, number: d.puzzle.number, secret: d.puzzle.secret, collab: d.collab, start: d.startsAt,
+      winner: found[0] ? { id: found[0].id, name: found[0].name, time: d.elapsed(found[0].finish.at) } : null });
     if (d.collab) {
-      if (ps.some((p) => p.finish?.found)) together++;
+      if (found.length) together++;
       continue;
     }
     n++;
-    const found = ps.filter((p) => p.finish?.found).sort((a, b) => a.finish.at - b.finish.at);
     for (const p of ps) {
       players[p.id] ??= { name: p.name, wins: 0, played: 0 };
       players[p.id].name = p.name;  // the latest
@@ -417,7 +421,7 @@ export function tally(rounds, now) {
       (h2h[`${a.id}|${b.id}`] ??= [0, 0])[place(a) < place(b) ? 0 : 1]++;
     }
   }
-  return { rounds: n, together, players, h2h };
+  return { rounds: n, together, players, h2h, past };
 }
 
 export class DuelError extends Error {}
