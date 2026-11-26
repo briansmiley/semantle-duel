@@ -704,9 +704,12 @@ let currentView = null;  // the duel on screen, if any
     d.classList.toggle("tight", vv.height < fullHeight + 8);
   };
   const follow = () => { if (!vv) return; vv.addEventListener("resize", fit); vv.addEventListener("scroll", fit); fit(); };
-  d.addEventListener("close", () => { vv?.removeEventListener("resize", fit); vv?.removeEventListener("scroll", fit); place(null); d.classList.remove("tight"); });
-  // cancel throws the draft away; a tap outside only puts it aside
-  $("#report .cancel").onclick = () => { ta.value = ""; setImage(null); d.close(); };
+  // however it closes (cancel, Escape, a tap outside), the draft goes with it; one still sending is kept for its retry
+  d.addEventListener("close", () => {
+    vv?.removeEventListener("resize", fit); vv?.removeEventListener("scroll", fit); place(null); d.classList.remove("tight");
+    if (!sending) { ta.value = ""; setImage(null); }
+  });
+  $("#report .cancel").onclick = () => d.close();
 
   // A screenshot, picked, dropped or pasted: shrunk to a JPEG no bigger than 1600px on its longer side.
   let image = null;
