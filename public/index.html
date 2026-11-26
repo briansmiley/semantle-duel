@@ -988,10 +988,14 @@ async function archivePage() {
 }
 
 /* ---------- duel ---------- */
-// /d/<room> (or any round of it) opens the room's latest round, unless you're still racing an earlier one.
+// /d/<room> opens the room's latest round (unless you're still racing an earlier one); ?round opens just that one,
+// and stays on it once its rematch is made, with a link on to it.
+const pinned = new URLSearchParams(location.search).has("round");
 async function openDuel(code) {
   let id = code;
-  try { id = (await (await fetch(`/d/${code}/head?player=${encodeURIComponent(me)}`)).json()).id ?? code; } catch {}
+  if (!pinned) {
+    try { id = (await (await fetch(`/d/${code}/head?player=${encodeURIComponent(me)}`)).json()).id ?? code; } catch {}
+  }
   duelPage(id);
 }
 
@@ -1078,9 +1082,10 @@ function duelPage(id) {
     es.addEventListener("ping", () => (heard = Date.now()));
     es.addEventListener("signal", (e) => { heard = Date.now(); const m = JSON.parse(e.data); voice.onSignal(m.from, m.data); });
   };
-  // In voice when the page goes (a reload): the next page here joins voice by itself,
-  // if it comes within 30s. Registered before the voice chat's own pagehide, which leaves voice.
-  addEventListener("pagehide", () => { try { if (voice.state.status === "on") sessionStorage.setItem(VOICE_INTO, `${id}|${Date.now()}`); } catch {} });
+  // In voice when the page goes (a reload, or from a ?round page on to its rematch): the next page here joins voice
+  // by itself, if it comes within 30s. Registered before the voice chat's own pagehide, which leaves voice.
+  const carry = (to) => { try { if (voice.state.status === "on") sessionStorage.setItem(VOICE_INTO, `${to}|${Date.now()}`); } catch {} };
+  addEventListener("pagehide", () => { try { if (!sessionStorage.getItem(VOICE_INTO)) carry(id); } catch {} });
   const voice = voiceChat(() => base, () => view && voiceBar(view));
   let rejoinVoice = false;  // join once we're a player here
   try {
@@ -1103,7 +1108,7 @@ function duelPage(id) {
     if (v.id !== id || (view && v.now < view.now)) return;  // a round this page has moved on from, or an older snapshot arriving late
     view = currentView = v;
     skew = view.now - Date.now();
-    if (v.next && !racing()) return into(v.next);  // the rematch is made: on into it
+    if (v.next && !racing() && !pinned) return into(v.next);  // the rematch is made: on into it (a ?round page links to it)
     voice.sync(v.voice);
     if (rejoinVoice && v.players.some((p) => p.id === me)) { rejoinVoice = false; voice.join(); }
     // The same news often comes twice (the reply to a guess, then the event stream): redraw once, so a
@@ -1350,8 +1355,13 @@ function duelPage(id) {
     nav.hidden = !(mine ? mine.finish : v.status === "over");
     if (nav.hidden) return;
     const kids = [];
-    if (v.rematch) picking = false;  // (so a withdrawn proposal leaves just "rematch")
-    if (v.rematch && mine && v.rematch.by === me) {
+    if (v.next || v.rematch) picking = false;  // (so a withdrawn proposal leaves just "rematch")
+    if (v.next) {
+      // a ?round page, staying on this round: the rematch is made, and in its lobby you ready up as ever
+      const a = el("a", { href: `/d/${v.room}`, class: "lead" }, "on to the rematch →");
+      a.onclick = () => carry(v.next);
+      kids.push(a);
+    } else if (v.rematch && mine && v.rematch.by === me) {
       // you proposed it: the picker stays as you left it, with your pick lit, and the vote after it
       const r = v.rematch;
       const on = r.mode === "random" ? "random" : !r.puzzle || r.puzzle === today ? "today" : "archive";
