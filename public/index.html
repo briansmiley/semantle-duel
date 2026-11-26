@@ -527,7 +527,7 @@ function openList(rooms) {
   ))));
 }
 
-const VOICE_INTO = "sd-voice-into";  // sessionStorage: "<duel id>|<when>": this tab was in voice, heading into (or reloading) that duel
+const VOICE_INTO = "sd-voice-into";  // sessionStorage: "<duel id>|<when>": this tab was in voice in that duel when its page went (a reload)
 
 // Propose a rematch of a finished duel on this puzzle; whoever asks first sets it, and it's made once every player
 // has said yes. Nobody is moved off the finished round: returns its view, with the proposal in it (someone else's,
@@ -980,20 +980,18 @@ async function archivePage() {
     const b = el("button", { class: played.has(n) ? "played" : "", title: played.has(n) ? "played" : "" },
       el("b", { class: "num" }, `#${n}`),
       el("small", {}, d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })));
-    // a rematch proposed: back to the finished round to wait for the others (it moves on into the rematch once that's made)
-    b.onclick = () => (rematchOf ? rematch(rematchOf, n, b, undefined, collabNext === null ? undefined : collabNext === "1").then((v) => v && (location.href = `/d/${rematchOf}?round`)) : newDuel(n, b));
+    // a rematch proposed: back to the finished round to wait for the others (or on into the rematch, should it already be made)
+    b.onclick = () => (rematchOf ? rematch(rematchOf, n, b, undefined, collabNext === null ? undefined : collabNext === "1").then((v) => v && (location.href = `/d/${rematchOf}`)) : newDuel(n, b));
     months.get(key).push(b);
   }
   $("#archive .months").replaceChildren(...[...months].flatMap(([m, bs]) => [el("h3", {}, m), el("div", { class: "grid" }, ...bs)]));
 }
 
 /* ---------- duel ---------- */
-// /d/<room> opens the room's latest round (unless you're still racing an earlier one); ?round opens just that one.
+// /d/<room> (or any round of it) opens the room's latest round, unless you're still racing an earlier one.
 async function openDuel(code) {
   let id = code;
-  if (!new URLSearchParams(location.search).has("round")) {
-    try { id = (await (await fetch(`/d/${code}/head?player=${encodeURIComponent(me)}`)).json()).id ?? code; } catch {}
-  }
+  try { id = (await (await fetch(`/d/${code}/head?player=${encodeURIComponent(me)}`)).json()).id ?? code; } catch {}
   duelPage(id);
 }
 
@@ -1082,13 +1080,12 @@ function duelPage(id) {
   };
   // In voice when the page goes (a reload): the next page here joins voice by itself,
   // if it comes within 30s. Registered before the voice chat's own pagehide, which leaves voice.
-  const carry = (to) => { try { if (voice.state.status === "on") sessionStorage.setItem(VOICE_INTO, `${to}|${Date.now()}`); } catch {} };
-  addEventListener("pagehide", () => { try { if (!sessionStorage.getItem(VOICE_INTO)) carry(id); } catch {} });
+  addEventListener("pagehide", () => { try { if (voice.state.status === "on") sessionStorage.setItem(VOICE_INTO, `${id}|${Date.now()}`); } catch {} });
   const voice = voiceChat(() => base, () => view && voiceBar(view));
   let rejoinVoice = false;  // join once we're a player here
   try {
-    const [into, at] = (sessionStorage.getItem(VOICE_INTO) ?? "").split("|");
-    rejoinVoice = into === id && Date.now() - Number(at) < 30_000;
+    const [to, at] = (sessionStorage.getItem(VOICE_INTO) ?? "").split("|");
+    rejoinVoice = to === id && Date.now() - Number(at) < 30_000;
     sessionStorage.removeItem(VOICE_INTO);
   } catch {}
   connect();
@@ -1127,6 +1124,7 @@ function duelPage(id) {
     view = currentView = null; drawn = null; greeted = false;
     seen = null; draft = ""; pending = []; recall = null; flashRecall = false; note = null;
     picking = false; nextCollab = null; openRival = null;
+    editing = !store.get("sd-name"); showMine();
     chart = { open: false, x: "t", avg: false, hide: new Set(), picking: false };
     hideCut();
     $("#board").replaceChildren();
@@ -1551,7 +1549,9 @@ function duelPage(id) {
         if (known.some((g) => g.word === word)) { recall = word; flashRecall = true; return render(); }
         if (pending.includes(word)) return render();
         pending.push(word); render();
+        const round = id;
         const r = await post(`${base}/guess`, { player: me, word });
+        if (id !== round) return;  // the page has moved on to a rematch: whatever came of this word was the last round's
         pending = pending.filter((w) => w !== word);
         if (r.view) apply(r.view);  // draws it (once), unless the event stream already did
         if (!r.ok) {
