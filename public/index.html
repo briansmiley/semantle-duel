@@ -1382,6 +1382,11 @@ function duelPage(id) {
     if (fresh && v.status === "playing" && inIt && !matchMedia("(hover: none)").matches) input.focus({ preventScroll: true });
   }
 
+  function pausedText(v) {
+    const by = v.paused?.by && v.players.find((p) => p.id === v.paused.by);
+    return !by ? "paused while away" : by.id === me ? "paused" : `${by.name} paused`;
+  }
+
   function pausebar(v, mine) {
     const bar = $("#pausebar");
     const racer = mine && !mine.finish && v.status === "playing";
@@ -1392,10 +1397,9 @@ function duelPage(id) {
       b.onclick = () => post(`${base}/pause`, { player: me, paused }).then((r) => r.view && apply(r.view));
       return b;
     };
-    const by = v.paused?.by && v.players.find((p) => p.id === v.paused.by);
     const quit = racer && v.collab ? [" · ", ...giveUpVote(v)] : [];  // (a round can be given up while paused, so the vote stays)
     const kids = !v.paused ? (racer ? ["·", toggle("pause", true), " · ", ...hint(v), ...quit] : [])
-      : [`· ${!by ? "paused while away" : by.id === me ? "paused" : `${by.name} paused`}`, racer ? toggle("resume", false) : "", ...quit];
+      : [`· ${pausedText(v)}`, racer ? toggle("resume", false) : "", ...quit];
     bar.replaceChildren(...kids);
   }
 
@@ -1735,7 +1739,7 @@ function duelPage(id) {
 
     // racing: guess; finished: keep checking words, just for their scores
     if (mine && v.players.some((q) => q.id === me) && (v.status === "playing" || v.status === "over")) {
-      input.placeholder = f ? "check a word" : "type a guess";
+      input.placeholder = f ? "check a word" : v.paused ? pausedText(v) : "type a guess";
       input.disabled = submit.disabled = !!v.paused && !f;
       submit.textContent = f ? "check" : "guess";
       quit.hidden = !!(f || v.collab);  // (co-op: giving up is a vote, up by the clock)
