@@ -12,7 +12,7 @@ const ABANDON_MS = 24 * 3600_000; // a started duel with no moves this long ends
 export const AWAY_MS = Number(process.env.AWAY_MS ?? 90_000);
 
 /** @typedef {{n:number, word:string, score:number, rank:number|null, at:number, hint?:boolean}} Guess  hint: given to everyone, agreed on */
-/** @typedef {{word:string, score:number, rank:number|null, at:number}} Check  a word scored after you finished, for your eyes only */
+/** @typedef {{word:string, score:number, rank:number|null, at:number}} Check  a word scored after finishing; shown to whoever may see everything (finished, setter, round over), not to those still racing */
 /** @typedef {{at:number, found:boolean}} Finish */
 /** @typedef {{from:number, to:number|null, by:string|null}} Pause  by: who pressed pause, or null when everyone left */
 /** @typedef {{by:string, puzzle?:number, mode?:string, collab:boolean, avoid?:string[], asks:string[]}} Rematch  proposed, not yet made; asks: who has said yes */
@@ -135,7 +135,16 @@ export class Duel {
   /** Out of the lobby (they left before it started). Returns true if they were in it. */
   leave(playerId, now) {
     if (this.status(now) !== "lobby") return false;
-    return this.players.delete(playerId);
+    if (!this.players.delete(playerId)) return false;
+    this.startIfAllReady(now);  // the one who wasn't ready may be the one who left
+    return true;
+  }
+
+  /** Starts the countdown if two or more are in and all are ready; returns true if it did. */
+  startIfAllReady(now) {
+    if (this.players.size < 2 || ![...this.players.values()].every((q) => q.ready)) return false;
+    this.start(now);
+    return true;
   }
 
   start(now) {
@@ -150,9 +159,7 @@ export class Duel {
     if (!p) throw new DuelError("not in this duel");
     if (this.status(now) !== "lobby") throw new DuelError("already started");
     p.ready = ready;
-    if (this.players.size < 2 || ![...this.players.values()].every((q) => q.ready)) return false;
-    this.start(now);
-    return true;
+    return this.startIfAllReady(now);
   }
 
   /** Compete or collab, in the lobby. A change un-readies everyone, so nobody starts in a mode they didn't agree to. */
@@ -345,7 +352,7 @@ export class Duel {
           // someone else found their own way to this word too (scores give that away anyway)
           shared: !g.hint && [...this.players.values()].some((q) => q !== p && q.guesses.some((h) => h.word === g.word && !h.hint)),
         })),
-        checks: p.id === viewerId ? p.checks ?? [] : [],
+        checks: reveal ? p.checks ?? [] : [],  // only the finished have any, and they see everything
       })),
     };
   }

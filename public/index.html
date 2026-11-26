@@ -116,6 +116,8 @@
   #lobby .who .others { display: contents; }
   #mine { display: inline-flex; align-items: baseline; gap: .3em; }
   #mine input { font-size: inherit; width: 8em; }
+  #mine .leavebtn { margin-left: .5em; color: var(--faint); font-size: .8em; align-self: center; }
+  #mine .leavebtn:hover { color: var(--ink); }
   #mine .joinbtn { margin-left: .5em; border-bottom: 2px solid var(--hot); padding-bottom: 1px; }
   #mine .pencil { color: var(--faint); align-self: center; display: grid; }
   #mine .pencil:hover { color: var(--ink); }
@@ -140,6 +142,8 @@
   #board .others .side { font-size: .82rem; }
   #board .others .side li.heads { display: none; }
   #board .others .side h2 { font-size: 1.05rem; }
+  /* each opponent's whole list, in a box about nine rows high that scrolls, so one long list can't push the rest away */
+  #board .others .side ol { max-height: 20em; overflow-y: auto; }
   #rivals { display: none; }
   @media (max-width: 700px) {
     /* minmax(0, …): a bare 1fr would grow to its widest row and run off the screen */
@@ -376,7 +380,7 @@
   <div id="tally" hidden></div>
   <div id="graph" hidden></div>
   <section id="lobby" hidden>
-    <div class="who"><span id="mine"><form id="nameform"><input class="line" id="name" placeholder="your name" maxlength="24" autocomplete="off"></form><span class="me"></span><button type="button" class="pencil" title="change your name" aria-label="change your name"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4"/></svg></button><button type="button" class="joinbtn">join</button></span><span class="others"></span></div>
+    <div class="who"><span id="mine"><form id="nameform"><input class="line" id="name" placeholder="your name" maxlength="24" autocomplete="off"></form><span class="me"></span><button type="button" class="pencil" title="change your name" aria-label="change your name"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4"/></svg></button><button type="button" class="joinbtn">join</button><button type="button" class="leavebtn">leave</button></span><span class="others"></span></div>
     <div class="mode"></div>
     <div><button id="go" disabled>ready</button><span class="wait"></span></div>
   </section>
@@ -700,9 +704,12 @@ let currentView = null;  // the duel on screen, if any
     d.classList.toggle("tight", vv.height < fullHeight + 8);
   };
   const follow = () => { if (!vv) return; vv.addEventListener("resize", fit); vv.addEventListener("scroll", fit); fit(); };
-  d.addEventListener("close", () => { vv?.removeEventListener("resize", fit); vv?.removeEventListener("scroll", fit); place(null); d.classList.remove("tight"); });
-  // cancel throws the draft away; a tap outside only puts it aside
-  $("#report .cancel").onclick = () => { ta.value = ""; setImage(null); d.close(); };
+  // however it closes (cancel, Escape, a tap outside), the draft goes with it; one still sending is kept for its retry
+  d.addEventListener("close", () => {
+    vv?.removeEventListener("resize", fit); vv?.removeEventListener("scroll", fit); place(null); d.classList.remove("tight");
+    if (!sending) { ta.value = ""; setImage(null); }
+  });
+  $("#report .cancel").onclick = () => d.close();
 
   // A screenshot, picked, dropped or pasted: shrunk to a JPEG no bigger than 1600px on its longer side.
   let image = null;
@@ -726,7 +733,10 @@ let currentView = null;  // the duel on screen, if any
   d.addEventListener("paste", (e) => { const f = imageIn(e.clipboardData.files); if (f) { e.preventDefault(); attach(f); } });
   d.addEventListener("dragover", (e) => e.preventDefault());
   d.addEventListener("drop", (e) => { e.preventDefault(); attach(imageIn(e.dataTransfer.files)); });
-  d.onclick = (e) => { if (e.target === d) d.close(); };  // tap outside (braces: an onclick returning false would cancel the send)
+  // tap outside, but not a drag (selecting text) that only ends there (braces: an onclick returning false would cancel the send)
+  let pressedOutside = false;
+  d.addEventListener("pointerdown", (e) => (pressedOutside = e.target === d));
+  d.onclick = (e) => { if (e.target === d && pressedOutside) d.close(); };
   $("#report form").onsubmit = async (e) => {
     e.preventDefault();
     if (!ta.value.trim()) return ta.focus();
@@ -1052,6 +1062,11 @@ function duelPage(id) {
     store.set("sd-name", name);
     join(name).then((r) => r.view && apply(r.view));
   };
+  $("#mine .leavebtn").onclick = () => {
+    clearTimeout(naming);  // a name still on its way up would put you back in
+    voice.leave();  // voice is for the players: out of it too, or your mic stays open with its bar hidden
+    post(`${base}/leave`, { player: me }).then((r) => r.view && apply(r.view));
+  };
   // Your name in the list follows the box as you type; everyone else sees it once you pause.
   let naming = null;
   $("#name").oninput = () => {
@@ -1181,6 +1196,7 @@ function duelPage(id) {
       const mine = v.players.find((p) => p.id === me);
       $("#mine").hidden = setting || (!mine && v.players.length >= v.max);
       $("#mine .joinbtn").hidden = !!mine;
+      $("#mine .leavebtn").hidden = !mine;
       $("#mine .me").replaceChildren($("#name").value.trim() || mine?.name || "", ...(mine ? [tick(mine)] : []));
       // someone whose page has closed: greyed, "away"; the server drops them if they don't come back soon
       const away = (p) => v.here && !v.here.includes(p.id);
@@ -1231,7 +1247,32 @@ function duelPage(id) {
     // a crowd: the first (you) on the left, everyone else stacked beside
     const drawn = sides.map((p) => side(p, v));
     const before = rowsAt();
-    board.replaceChildren(...(sides.length > 2 ? [drawn[0], el("div", { class: "others" }, ...drawn.slice(1))] : drawn));
+    // A crowd's lists scroll in their own boxes, and a box being dragged or gliding stops dead if it's swapped
+    // for a new one. So each opponent's box (and everything round it) stays put, and only what's in it is redrawn.
+    const others = board.querySelector(":scope > .others");
+    if (sides.length <= 2 || !others) board.replaceChildren(...(sides.length > 2 ? [drawn[0], el("div", { class: "others" }, ...drawn.slice(1))] : drawn));
+    else {
+      const want = drawn.slice(1).map((s) => {
+        const was = [...others.children].find((c) => c.dataset.id === s.dataset.id), box = was?.querySelector(":scope > ol");
+        if (!box) return s;
+        const ol = s.querySelector(":scope > ol");
+        was.className = s.className;
+        box.replaceChildren(...ol.childNodes);
+        for (const n of [...was.childNodes]) if (n !== box) n.remove();
+        box.before(...[...s.childNodes].filter((n) => n !== ol));
+        return was;
+      });
+      for (const c of [...others.children]) if (!want.includes(c)) c.remove();
+      want.forEach((s, i) => {
+        if (others.children[i] === s) return;
+        // someone moved up the standings: their box is re-placed, which ends a scroll but not where it was
+        const box = s.querySelector(":scope > ol"), y = box.scrollTop;
+        others.insertBefore(s, others.children[i] ?? null);
+        box.scrollTop = y;
+      });
+      for (const c of [...board.children]) if (c !== others) c.remove();
+      others.before(drawn[0]);
+    }
     strip(v, sides.filter((p) => p.id !== me), inIt);
     glide(before);
     seen = new Set(v.players.flatMap((p) => [...p.guesses.map((g) => `${p.id}:${g.n}`), ...(p.checks ?? []).map((c, k) => `${p.id}:c${k}`)]));
@@ -1388,9 +1429,9 @@ function duelPage(id) {
   }
 
   // The finished round as a chart: each player's similarity, by guess number or time on the round's clock, raw
-  // or as a rolling average, with faint lines where the proximity column's ranks 1, 500 and 850 fall. Hints are
+  // as a rolling average, or as the best so far (the default, so it only rises), with faint lines where the proximity column's ranks 1, 500 and 850 fall. Hints are
   // left out, being nobody's guess. Only once it's over, so it can't show a race still running.
-  let chart = { open: false, x: "t", avg: false, hide: new Set(), picking: false }, chartW = 0;  // hide: unticked in the legend's picker
+  let chart = { open: false, x: "t", y: "best", hide: new Set(), picking: false }, chartW = 0;  // hide: unticked in the legend's picker
   addEventListener("resize", () => { if (view && chart.open && $("#graph").clientWidth !== chartW) graph(view); });
   // a tap anywhere but the picker or the legend closes the picker (the path, since a tap in it may redraw it)
   addEventListener("click", (e) => {
@@ -1411,14 +1452,17 @@ function duelPage(id) {
         const recent = gs.slice(Math.max(0, k - 4), k + 1);  // up to the last five of their own
         return recent.reduce((sum, h) => sum + h.score, 0) / recent.length;
       });
-      const points = gs.map((g, k) => [byTime ? g.time : g.n, chart.avg ? avgs[k] : g.score]);
+      let top = -Infinity;
+      const bests = gs.map((g) => (top = Math.max(top, g.score)));  // the best of their own so far
+      const ys = { best: bests, raw: gs.map((g) => g.score), avg: avgs }[chart.y];
+      const points = gs.map((g, k) => [byTime ? g.time : g.n, ys[k]]);
       // a colour and a dash each, so no two of the eight players look alike, in colour or without it
       return { p, gs, avgs, points, color: GRAPH_COLORS[i % 4], dash: GRAPH_DASHES[(i + (i >> 2)) % 4] };
     });
     // in the proximity bar's own colour at that rank; labelled by nearness, rank 1 being the 1000th closest word
     const t = v.thresholds;
     const lines = t ? [[t.r1, 1, "1000th"], [t.r500, 500, "500th"], [t.r850, 850, "150th"]].filter(([y]) => y != null) : [];
-    // the axes fit everyone's scores, raw and averaged, and the lines, so they hold still as the options change. The
+    // the axes fit everyone's scores, raw and averaged (the best are among the raw), and the lines, so they hold still as the options change. The
     // found word's 100 would squash the rest under an empty gap, so it gets a band of its own above a break in the axis.
     const all = [...series.flatMap((s) => [...s.gs.map((g) => g.score), ...s.avgs]), ...lines.map(([y]) => y)], xs = series.flatMap((s) => s.points.map(([x]) => x));
     const found = all.some((y) => y >= 100), scores = all.filter((y) => y < 100);
@@ -1457,9 +1501,9 @@ function duelPage(id) {
     const plot = el("div", {});
     plot.innerHTML = `<svg class="plot" viewBox="0 0 ${W} ${H}" role="img" aria-label="each player's similarity over the round">${marks}</svg>`;  // numbers only: names stay in the legend
 
-    const avg = el("span", { class: "modes" }, ...[[false, "raw"], [true, "5-avg"]].map(([value, label]) => {
-      const b = el("button", { type: "button", "aria-pressed": String(chart.avg === value) }, label);
-      b.onclick = () => { chart.avg = value; graph(view); };
+    const avg = el("span", { class: "modes" }, ...[["best", "best"], ["raw", "raw"], ["avg", "5-avg"]].map(([value, label]) => {
+      const b = el("button", { type: "button", "aria-pressed": String(chart.y === value) }, label);
+      b.onclick = () => { chart.y = value; graph(view); };
       return b;
     }));
     const swatch = (s) => {
@@ -1505,7 +1549,8 @@ function duelPage(id) {
   // knowing who made it (by). Whoever is only watching gets the same board, without the box to type in.
   function roomSide(v) {
     const guesses = v.players.flatMap((p) => p.guesses.map((g) => ({ ...g, by: p.id }))).sort((a, b) => a.n - b.n);
-    return { id: me, guesses, checks: v.players.find((p) => p.id === me)?.checks, finish: v.players[0]?.finish ?? null };
+    const checks = v.players.flatMap((p) => (p.checks ?? []).map((c, k) => ({ ...c, by: p.id, k })));  // k: its place in theirs
+    return { id: me, guesses, checks, finish: v.players[0]?.finish ?? null };
   }
 
   // Each person's latest word (hints are nobody's).
@@ -1515,13 +1560,16 @@ function duelPage(id) {
       el("span", {}, el("b", {}, p.id === me ? "you" : p.name), " ", p.guesses.findLast((g) => !g.hint)?.word ?? "–")));
   }
 
+  // A player's list: their guesses and, among them, the words they checked after finishing, unnumbered.
+  const withChecks = (p) => [...p.guesses, ...(p.checks ?? []).map((c, k) => ({ ...c, n: null, k: c.k ?? k, check: true }))];
+
   function side(p, v) {
     const mine = p.id === me;
     const best = p.guesses.reduce((m, g) => Math.max(m, g.score), -Infinity);
     const n = p.guesses.length;
     const f = p.finish;
     const place = f?.found ? standings(v).indexOf(p) + 1 : 0;
-    const div = el("div", { class: "side" + (mine ? " me" : "") + (f?.found ? " found" : "") + (place === 1 ? " first" : "") });
+    const div = el("div", { class: "side" + (mine ? " me" : "") + (f?.found ? " found" : "") + (place === 1 ? " first" : ""), "data-id": p.id });
     div.append(el("h2", {},
       el("span", { class: "name" }, v.collab ? "together" : mine ? "you" : p.name),
       el("span", { class: "stat num" },
@@ -1577,8 +1625,7 @@ function duelPage(id) {
     }
 
     const ol = el("ol", {});
-    // words checked after finishing sit among the guesses, unnumbered
-    const all = [...p.guesses, ...(p.checks ?? []).map((c, k) => ({ ...c, n: null, k, check: true }))];
+    const all = withChecks(p);
     if (mine) pending = pending.filter((w) => !all.some((g) => g.word === w));
     if (mine && note && all.some((g) => g.word === note.word)) note = null;  // it got through after all
     const waiting = mine ? pending : [];
@@ -1586,10 +1633,7 @@ function duelPage(id) {
     const told = mine && note;
     if (all.length || waiting.length || told) ol.append(heads(sort, pickSort));
     const last = all.reduce((a, g) => (!a || g.at >= a.at ? g : a), null);
-    // a crowded table keeps opponents short until the end: their best by similarity, ordered as chosen
-    const cap = !mine && v.players.length > 2 && v.status !== "over" ? 8 : Infinity;
-    const more = all.length - cap;
-    const sorted = sortGuesses([...all].sort((a, b) => b.score - a.score).slice(0, cap));
+    const sorted = sortGuesses(all);
     // One row up top, for whatever happened last: a word that didn't count, one being scored, one already
     // guessed, or the latest guess. (A note is newer than anything pending: sending a word clears it.)
     if (told) ol.append(el("li", { class: "note latest", "data-key": `${p.id}:latest` }, el("span", { class: "n" }, ""), el("span", { class: "w" }, note.word), el("span", { class: "msg" }, note.msg)));
@@ -1599,7 +1643,6 @@ function duelPage(id) {
     // gave up: the word they didn't get, where it would have sat
     if (f && !f.found && v.secret) ol.append(el("li", { class: "missed", "data-key": `${p.id}:missed` }, el("span", { class: "n" }, ""), el("span", { class: "w" }, v.secret), el("span", { class: "s num" }, "100.00"), el("span", { class: "p" }, "😞")));
     for (const g of sorted) ol.append(row(g, p, v, false));
-    if (more > 0) ol.append(el("li", { class: "more", "data-key": `${p.id}:more` }, `+${more}`));
     if (v.collab) ol.querySelector(".heads")?.children[1].after(el("span", { class: "by" }, "Who"));
     div.append(ol);
     return div;
@@ -1623,7 +1666,8 @@ function duelPage(id) {
   }
 
   // Rows move rather than jump: before a redraw, where each row was (by key); after it, each one starts
-  // there and slides to its new place, and rows that are new fade in. Only what's on screen.
+  // there and slides to its new place, and rows that are new fade in. Only what's on screen (and, in a
+  // crowd's scrolling list, inside its box).
   function rowsAt() {
     const at = new Map();
     for (const li of document.querySelectorAll("#duel li[data-key]")) {
@@ -1637,9 +1681,11 @@ function duelPage(id) {
     for (const li of document.querySelectorAll("#duel li[data-key]")) {
       if (!li.offsetParent) continue;
       const now = li.getBoundingClientRect().top, was = before.get((li.closest("#rivals") ? "r:" : "b:") + li.dataset.key);
+      const box = li.closest(".others ol")?.getBoundingClientRect();
+      const lo = box ? Math.max(-60, box.top - li.offsetHeight) : -60, hi = box ? Math.min(h, box.bottom) : h;
       if (was === undefined) {
-        if (now > -60 && now < h) li.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: "ease-out" });
-      } else if (Math.abs(was - now) >= 1 && Math.min(was, now) < h && Math.max(was, now) > -60) {
+        if (now > lo && now < hi) li.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: "ease-out" });
+      } else if (Math.abs(was - now) >= 1 && Math.min(was, now) < hi && Math.max(was, now) > lo) {
         li.animate([{ transform: `translateY(${was - now}px)` }, { transform: "none" }], { duration: 170, easing: "cubic-bezier(.2,.7,.3,1)" });
       }
     }
@@ -1658,9 +1704,9 @@ function duelPage(id) {
     if (openRival && !others.some((p) => p.id === openRival)) openRival = null;
     const lead = sorted[0];
     $("#rivals .strip").replaceChildren(...sorted.map((p) => {
-      const f = p.finish, b = best(p), last = p.guesses.at(-1);
+      const f = p.finish, b = best(p), last = withChecks(p).reduce((a, g) => (!a || g.at >= a.at ? g : a), null);
       const place = f?.found ? order.indexOf(p) + 1 : 0;
-      const fresh = last && seen !== null && !seen.has(`${p.id}:${last.n}`);
+      const fresh = last && seen !== null && !seen.has(`${p.id}:${last.check ? `c${last.k}` : last.n}`);
       const first = place === 1 || (!order.some((q) => q.finish?.found) && p === lead && b);
       const chip = el("button", { type: "button", class: ["chip", openRival === p.id && "on", fresh && "fresh", first && "first", f?.found && "found"].filter(Boolean).join(" ") },
         el("span", { class: "name" }, p.name),
@@ -1675,11 +1721,12 @@ function duelPage(id) {
     const p = others.find((q) => q.id === openRival);
     const box2 = $("#rivals .open");
     if (!p) return box2.replaceChildren();
-    const f = p.finish, last = p.guesses.at(-1), ol = el("ol", {});
-    if (last && p.guesses.length > 1) ol.append(row(last, p, v, true));
+    const all = withChecks(p), f = p.finish, ol = el("ol", {});
+    const last = all.reduce((a, g) => (!a || g.at >= a.at ? g : a), null);
+    if (last && all.length > 1) ol.append(row(last, p, v, true));
     if (f && !f.found && v.secret) ol.append(el("li", { class: "missed", "data-key": `${p.id}:missed` }, el("span", { class: "n" }, ""), el("span", { class: "w" }, v.secret), el("span", { class: "s num" }, "100.00"), el("span", { class: "p" }, "😞")));
-    for (const g of sortGuesses(p.guesses)) ol.append(row(g, p, v, false));
-    if (!p.guesses.length) ol.append(el("li", { class: "more" }, "no guesses yet"));
+    for (const g of sortGuesses(all)) ol.append(row(g, p, v, false));
+    if (!all.length) ol.append(el("li", { class: "more" }, "no guesses yet"));
     box2.replaceChildren(ol);
   }
 
@@ -1689,11 +1736,11 @@ function duelPage(id) {
     const fresh = (isLatest || p.guesses.length === 1) && seen !== null && !seen.has(`${owner}:${key}`);
     // yours lands quietly (the score fades in); someone else's gets a highlight
     const lands = fresh && owner === me;
-    const li = el("li", { "data-key": `${p.id}:${isLatest ? "latest" : key}`, class: [isLatest && "latest", lands && "landed", fresh && !lands && "fresh", isAgain && "again", g.shared && "shared", g.check && "check", v.secret && g.word === v.secret && "secret"].filter(Boolean).join(" ") });
+    const li = el("li", { "data-key": isLatest ? `${p.id}:latest` : `${owner}:${key}`, class: [isLatest && "latest", lands && "landed", fresh && !lands && "fresh", isAgain && "again", g.shared && "shared", g.check && "check", v.secret && g.word === v.secret && "secret"].filter(Boolean).join(" ") });
     li.append(
       el("span", { class: "n num", title: g.shared ? "guessed by someone else too" : "" }, g.check ? "·" : g.n),
       wordOf(g, p, g.hint && !v.collab ? tag("hint") : g.check ? tag("after") : ""),
-      ...(v.collab ? [el("span", { class: g.hint ? "by hint" : "by" }, g.hint ? "hint" : g.check ? "" : owner === me ? "you" : v.players.find((q) => q.id === owner)?.name ?? "")] : []),
+      ...(v.collab ? [el("span", { class: g.hint ? "by hint" : "by" }, g.hint ? "hint" : owner === me ? "you" : v.players.find((q) => q.id === owner)?.name ?? "")] : []),
       el("span", { class: "s num", style: `color:${heat(g)}` }, g.score.toFixed(2)),
       proximity(g),
     );
