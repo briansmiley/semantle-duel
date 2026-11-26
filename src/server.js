@@ -1,7 +1,7 @@
 import http from "node:http";
 import { readFile, writeFile, rename, mkdir } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
-import { Duel, DuelError, tally } from "./duel.js";
+import { Duel, DuelError, tally, AWAY_MS } from "./duel.js";
 import * as semantle from "./semantle.js";
 import * as vectors from "./vectors.js";
 import { feedback } from "./feedback.js";
@@ -112,6 +112,12 @@ function viewOf(room, player, now) {
 /** The players with the page open right now. */
 function present(room) {
   return [...room.duel.players.keys()].filter((id) => [...room.listeners].some((l) => l.player === id));
+}
+
+/** Who a hint or a co-op give-up waits for: those racing with the page open or heard from lately, so one who left can't hold it up. */
+function voters(room, now) {
+  const here = new Set(present(room));
+  return room.duel.racers(now).filter((p) => here.has(p.id) || now - room.duel.lastHeard(p) < AWAY_MS);
 }
 
 // In a lobby, someone whose page has been gone this long is dropped from it, so a player who left can't hold
@@ -289,7 +295,7 @@ async function handle(req, res) {
   } else if (action === "giveup") {
     duel.giveUp(player, now);
   } else if (action === "askgiveup") {
-    duel.askGiveUp(player, !!msg.want, now);
+    duel.askGiveUp(player, !!msg.want, now, voters(room, now));
   } else if (action === "collab") {
     duel.setCollab(player, !!msg.collab, now);
   } else if (action === "ready") {
@@ -306,7 +312,7 @@ async function handle(req, res) {
       await room.rematch;
     }
   } else if (action === "hint") {
-    if (duel.askHint(player, !!msg.want, now)) {
+    if (duel.askHint(player, !!msg.want, now, voters(room, now))) {
       // Everyone agreed.
       const best = duel.bestRank(now);
       if (best >= 999) { duel.hintAsks = []; await save(duel); broadcast(room); return json(res, 409, { error: "nothing closer but the word itself" }); }

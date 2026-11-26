@@ -222,20 +222,20 @@ export class Duel {
     return [next, racing.size > 0 && [...racing].every((id) => next.includes(id))];
   }
 
-  /** Ask for a hint (or stop asking). Returns true once everyone still racing has asked. */
-  askHint(playerId, want, now) {
+  /** Ask for a hint (or stop asking). Returns true once everyone still racing (or of `voters`) has asked. */
+  askHint(playerId, want, now, voters) {
     if (!this.racing(playerId, now)) throw new DuelError("not playing");
     if (this.pause()) throw new DuelError("paused");
-    const [asks, all] = this.vote(this.hintAsks, playerId, want, now);
+    const [asks, all] = this.vote(this.hintAsks, playerId, want, now, voters);
     this.hintAsks = asks;
     return all;
   }
 
-  /** Co-op: ask to give up (or stop asking). Once everyone still racing has asked, the round ends for all. */
-  askGiveUp(playerId, want, now) {
+  /** Co-op: ask to give up (or stop asking). Once everyone still racing (or of `voters`) has asked, the round ends for all. */
+  askGiveUp(playerId, want, now, voters) {
     if (!this.collab) throw new DuelError("not a co-op round");
     if (!this.racing(playerId, now)) throw new DuelError("not playing");
-    const [asks, all] = this.vote(this.giveUpAsks, playerId, want, now);
+    const [asks, all] = this.vote(this.giveUpAsks, playerId, want, now, voters);
     this.giveUpAsks = asks;
     if (all) this.finishAll(false, now);
   }
