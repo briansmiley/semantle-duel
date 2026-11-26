@@ -761,13 +761,13 @@ let currentView = null;  // the duel on screen, if any
 // STUN only: two players both behind strict NATs won't hear each other (that would need a TURN relay).
 const ICE_SERVERS = [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302", "stun:stun.cloudflare.com:3478"] }];
 
-function voiceChat(base, changed) {
+function voiceChat(base, changed) {  // base(): the round's API path, which changes when the page moves on to a rematch
   const st = { status: "off", muted: false, error: null, speaking: new Set(), links: new Map() };
   const peers = new Map();  // id -> { pc, audio, queued }
   const meters = new Map(); // id -> { node, source }
   let mic = null, ctx = null, timer = null, asks = 0;
-  const signal = (to, data) => post(`${base}/signal`, { player: me, to, data: JSON.stringify(data) });
-  const tell = () => post(`${base}/voice`, { player: me, on: st.status === "on", muted: st.muted });
+  const signal = (to, data) => post(`${base()}/signal`, { player: me, to, data: JSON.stringify(data) });
+  const tell = () => post(`${base()}/voice`, { player: me, on: st.status === "on", muted: st.muted });
 
   async function join() {
     if (st.status !== "off") return;
@@ -980,7 +980,7 @@ async function archivePage() {
     const b = el("button", { class: played.has(n) ? "played" : "", title: played.has(n) ? "played" : "" },
       el("b", { class: "num" }, `#${n}`),
       el("small", {}, d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })));
-    // a rematch proposed: back to the finished round to wait for the others (just that one, should it already be made)
+    // a rematch proposed: back to the finished round to wait for the others (it moves on into the rematch once that's made)
     b.onclick = () => (rematchOf ? rematch(rematchOf, n, b, undefined, collabNext === null ? undefined : collabNext === "1").then((v) => v && (location.href = `/d/${rematchOf}?round`)) : newDuel(n, b));
     months.get(key).push(b);
   }
@@ -999,7 +999,7 @@ async function openDuel(code) {
 
 function duelPage(id) {
   $("#duel").hidden = false;
-  const base = `/d/${id}`;
+  let base = `/d/${id}`;  // (both change when the page moves on to a rematch: see into)
   let view = null, skew = 0, seen = null, draft = "", pending = [];  // pending: my guesses sent but not yet scored
    // seen: guesses already drawn, so only new ones flash
   let sort = { by: "score", dir: -1 };  // the lists' order: a column of SORTS, and which way (-1: high to low). Best first to start
@@ -1080,11 +1080,11 @@ function duelPage(id) {
     es.addEventListener("ping", () => (heard = Date.now()));
     es.addEventListener("signal", (e) => { heard = Date.now(); const m = JSON.parse(e.data); voice.onSignal(m.from, m.data); });
   };
-  // In voice when the page goes (a reload, or into a rematch): the next page here joins voice by itself,
+  // In voice when the page goes (a reload): the next page here joins voice by itself,
   // if it comes within 30s. Registered before the voice chat's own pagehide, which leaves voice.
-  const carry = (into) => { try { if (voice.state.status === "on") sessionStorage.setItem(VOICE_INTO, `${into}|${Date.now()}`); } catch {} };
+  const carry = (to) => { try { if (voice.state.status === "on") sessionStorage.setItem(VOICE_INTO, `${to}|${Date.now()}`); } catch {} };
   addEventListener("pagehide", () => { try { if (!sessionStorage.getItem(VOICE_INTO)) carry(id); } catch {} });
-  const voice = voiceChat(base, () => view && voiceBar(view));
+  const voice = voiceChat(() => base, () => view && voiceBar(view));
   let rejoinVoice = false;  // join once we're a player here
   try {
     const [into, at] = (sessionStorage.getItem(VOICE_INTO) ?? "").split("|");
@@ -1103,9 +1103,10 @@ function duelPage(id) {
   document.addEventListener("visibilitychange", here);
 
   function apply(v) {
-    if (view && v.now < view.now) return;  // an older snapshot arriving late
+    if (v.id !== id || (view && v.now < view.now)) return;  // a round this page has moved on from, or an older snapshot arriving late
     view = currentView = v;
     skew = view.now - Date.now();
+    if (v.next && !racing()) return into(v.next);  // the rematch is made: on into it
     voice.sync(v.voice);
     if (rejoinVoice && v.players.some((p) => p.id === me)) { rejoinVoice = false; voice.join(); }
     // The same news often comes twice (the reply to a guess, then the event stream): redraw once, so a
@@ -1117,6 +1118,21 @@ function duelPage(id) {
     render();
   }
   let drawn = null;  // what was last drawn, less the clock
+
+  // Into the rematch's lobby, on this page: the finished round's state goes, as on a page opened afresh, and the
+  // stream moves to the new round. Voice stays on: its first view there finds us missing and says we're in again.
+  function into(next) {
+    history.replaceState(null, "", `/d/${view.room}`);
+    id = next; base = `/d/${id}`;
+    view = currentView = null; drawn = null; greeted = false;
+    seen = null; draft = ""; pending = []; recall = null; flashRecall = false; note = null;
+    picking = false; nextCollab = null; openRival = null;
+    chart = { open: false, x: "t", avg: false, hide: new Set(), picking: false };
+    hideCut();
+    $("#board").replaceChildren();
+    for (const s of ["#board", "#rivals", "#banner", "#after", "#graph"]) $(s).hidden = true;  // till the new round's first view
+    connect();
+  }
 
   setInterval(tick, 250);
 
@@ -1136,7 +1152,8 @@ function duelPage(id) {
       greeted = true;
       // already in it, or a lobby of a room you made or have played in: in you go. Anywhere else, "join".
       const known = made().includes(v.room) || myRooms().some((r) => r.room === v.room);
-      if (savedName && v.setter?.id !== me && (v.players.some((p) => p.id === me) || (v.status === "lobby" && known))) join(savedName);
+      const name = store.get("sd-name");  // (as it is now: it may have been given on this page, a round ago)
+      if (name && v.setter?.id !== me && (v.players.some((p) => p.id === me) || (v.status === "lobby" && known))) join(name);
     }
     remember(v);
     const setting = v.setter?.id === me;  // you set the word: you watch, seeing every word
@@ -1335,13 +1352,8 @@ function duelPage(id) {
     nav.hidden = !(mine ? mine.finish : v.status === "over");
     if (nav.hidden) return;
     const kids = [];
-    if (v.next || v.rematch) picking = false;  // (so a withdrawn proposal leaves just "rematch")
-    if (v.next) {
-      // everyone said yes: it's made, and in its lobby you ready up as ever
-      const a = el("a", { href: `/d/${v.room}`, class: "lead" }, "on to the rematch →");
-      a.onclick = () => carry(v.next);
-      kids.push(a);
-    } else if (v.rematch && mine && v.rematch.by === me) {
+    if (v.rematch) picking = false;  // (so a withdrawn proposal leaves just "rematch")
+    if (v.rematch && mine && v.rematch.by === me) {
       // you proposed it: the picker stays as you left it, with your pick lit, and the vote after it
       const r = v.rematch;
       const on = r.mode === "random" ? "random" : !r.puzzle || r.puzzle === today ? "today" : "archive";
