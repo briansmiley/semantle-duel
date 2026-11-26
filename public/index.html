@@ -1710,7 +1710,7 @@ function duelPage(id) {
       form.append(input, submit, f || v.collab ? "" : quit);  // (co-op: giving up is a vote, up by the clock)
       form.onsubmit = async (e) => {
         e.preventDefault();
-        const word = input.value.trim().toLowerCase();
+        const word = input.value.replace(/[‘’ʼ]/g, "'").trim().toLowerCase();  // the stored form (server clean()), so duplicate checks match
         if (!word) return;
         draft = ""; input.value = "";
         note = null; recall = null;
