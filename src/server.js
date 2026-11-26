@@ -1,10 +1,11 @@
 import http from "node:http";
 import { readFile, writeFile, rename, mkdir } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { Duel, DuelError, tally } from "./duel.js";
 import * as semantle from "./semantle.js";
 import * as vectors from "./vectors.js";
-import { feedback } from "./feedback.js";
+import { feedback, rateLimit } from "./feedback.js";
 
 // What a "random word" duel draws from (scripts/build-words.js): Semantle's archive answers, word -> number,
 // and our own extra words, filtered for fitness.
@@ -23,6 +24,8 @@ const rooms = new Map();
 
 const fileOf = (id) => `${DATA}/${id}.json`;
 const receiveFeedback = feedback({ dir: `${DATA}/feedback` });
+const allowNewDuel = rateLimit(20, 60_000);  // per address: duels share the volume, so a script mustn't fill it
+const addressOf = (req) => String(req.headers["fly-client-ip"] ?? req.socket.remoteAddress);
 
 // One write at a time per duel: two guesses landing together used to race on
 // the same .tmp file, and the loser's request failed after its guess counted.
@@ -161,7 +164,8 @@ async function createDuel(which, room = null, { mode, word, setter, avoid, colla
   } else {
     pick = await puzzle(Number.isInteger(which) && which >= 1 && which <= today ? which : today);
   }
-  const id = newId();
+  let id;
+  do id = newId(); while (rooms.has(id) || existsSync(fileOf(id)));  // ids are short: past a few thousand duels, they meet
   const duel = new Duel(id, pick, Date.now());
   if (room) duel.room = room;
   duel.collab = !!collab;
@@ -188,12 +192,12 @@ async function handle(req, res) {
   }
 
   if (req.method === "POST" && url.pathname === "/feedback") {
-    const address = String(req.headers["fly-client-ip"] ?? req.socket.remoteAddress);
-    const [code, out] = await receiveFeedback(await body(req, 3_000_000), address);  // room for a screenshot
+    const [code, out] = await receiveFeedback(await body(req, 3_000_000), addressOf(req));  // room for a screenshot
     return json(res, code, out);
   }
 
   if (req.method === "POST" && url.pathname === "/duels") {
+    if (!allowNewDuel(addressOf(req))) return json(res, 429, { error: "that's a lot of new duels; try again in a minute" });
     const { puzzle: which, mode, word, player, name, avoid } = await body(req, 16_384);
     return json(res, 200, { id: await createDuel(which, null, { mode, word, avoid, setter: { id: player, name } }) });
   }
