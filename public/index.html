@@ -1556,7 +1556,7 @@ function duelPage(id) {
 
     const ol = el("ol", {});
     // words checked after finishing sit among the guesses, unnumbered
-    const all = [...p.guesses, ...(p.checks ?? []).map((c, k) => ({ ...c, n: null, k, check: true }))];
+    const all = withChecks(p);
     if (mine) pending = pending.filter((w) => !all.some((g) => g.word === w));
     if (mine && note && all.some((g) => g.word === note.word)) note = null;  // it got through after all
     const waiting = mine ? pending : [];
@@ -1625,6 +1625,9 @@ function duelPage(id) {
 
   // phone: everyone else in one strip (finished by place, then by best score), each still racing with their
   // best guess; tap a name for their list
+  // a player's guesses plus the words they checked after finishing, unnumbered
+  const withChecks = (p) => [...p.guesses, ...(p.checks ?? []).map((c, k) => ({ ...c, n: null, k, check: true }))];
+
   function strip(v, others, inIt) {
     const box = $("#rivals");
     box.hidden = !inIt || !others.length;
@@ -1653,11 +1656,12 @@ function duelPage(id) {
     const p = others.find((q) => q.id === openRival);
     const box2 = $("#rivals .open");
     if (!p) return box2.replaceChildren();
-    const f = p.finish, last = p.guesses.at(-1), ol = el("ol", {});
-    if (last && p.guesses.length > 1) ol.append(row(last, p, v, true));
+    const all = withChecks(p), f = p.finish, ol = el("ol", {});
+    const last = all.reduce((a, g) => (!a || g.at >= a.at ? g : a), null);
+    if (last && all.length > 1) ol.append(row(last, p, v, true));
     if (f && !f.found && v.secret) ol.append(el("li", { class: "missed", "data-key": `${p.id}:missed` }, el("span", { class: "n" }, ""), el("span", { class: "w" }, v.secret), el("span", { class: "s num" }, "100.00"), el("span", { class: "p" }, "😞")));
-    for (const g of sortGuesses(p.guesses)) ol.append(row(g, p, v, false));
-    if (!p.guesses.length) ol.append(el("li", { class: "more" }, "no guesses yet"));
+    for (const g of sortGuesses(all)) ol.append(row(g, p, v, false));
+    if (!all.length) ol.append(el("li", { class: "more" }, "no guesses yet"));
     box2.replaceChildren(ol);
   }
 
