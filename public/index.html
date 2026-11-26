@@ -140,6 +140,8 @@
   #board .others .side { font-size: .82rem; }
   #board .others .side li.heads { display: none; }
   #board .others .side h2 { font-size: 1.05rem; }
+  /* each opponent's whole list, in a box about nine rows high that scrolls, so one long list can't push the rest away */
+  #board .others .side ol { max-height: 20em; overflow-y: auto; overscroll-behavior: contain; }
   #rivals { display: none; }
   @media (max-width: 700px) {
     /* minmax(0, …): a bare 1fr would grow to its widest row and run off the screen */
@@ -1211,7 +1213,10 @@ function duelPage(id) {
     // a crowd: the first (you) on the left, everyone else stacked beside
     const drawn = sides.map((p) => side(p, v));
     const before = rowsAt();
+    // a crowd's lists scroll in their own boxes: each stays where it was scrolled to across the redraw
+    const scrolled = new Map([...board.querySelectorAll(".others ol")].map((ol) => [ol.dataset.id, ol.scrollTop]));
     board.replaceChildren(...(sides.length > 2 ? [drawn[0], el("div", { class: "others" }, ...drawn.slice(1))] : drawn));
+    for (const ol of board.querySelectorAll(".others ol")) ol.scrollTop = scrolled.get(ol.dataset.id) ?? 0;
     strip(v, sides.filter((p) => p.id !== me), inIt);
     glide(before);
     seen = new Set(v.players.flatMap((p) => [...p.guesses.map((g) => `${p.id}:${g.n}`), ...(p.checks ?? []).map((c, k) => `${p.id}:c${k}`)]));
@@ -1554,7 +1559,7 @@ function duelPage(id) {
       div.append(el("form", { class: "slot", "aria-hidden": "true" }, el("input", { class: "line", tabindex: "-1", disabled: "disabled" }), el("button", { class: "submit", type: "button", tabindex: "-1" }, "guess")));
     }
 
-    const ol = el("ol", {});
+    const ol = el("ol", { "data-id": p.id });
     // words checked after finishing sit among the guesses, unnumbered
     const all = [...p.guesses, ...(p.checks ?? []).map((c, k) => ({ ...c, n: null, k, check: true }))];
     if (mine) pending = pending.filter((w) => !all.some((g) => g.word === w));
@@ -1564,10 +1569,7 @@ function duelPage(id) {
     const told = mine && note;
     if (all.length || waiting.length || told) ol.append(heads(sort, pickSort));
     const last = all.reduce((a, g) => (!a || g.at >= a.at ? g : a), null);
-    // a crowded table keeps opponents short until the end: their best by similarity, ordered as chosen
-    const cap = !mine && v.players.length > 2 && v.status !== "over" ? 8 : Infinity;
-    const more = all.length - cap;
-    const sorted = sortGuesses([...all].sort((a, b) => b.score - a.score).slice(0, cap));
+    const sorted = sortGuesses(all);
     // One row up top, for whatever happened last: a word that didn't count, one being scored, one already
     // guessed, or the latest guess. (A note is newer than anything pending: sending a word clears it.)
     if (told) ol.append(el("li", { class: "note latest", "data-key": `${p.id}:latest` }, el("span", { class: "n" }, ""), el("span", { class: "w" }, note.word), el("span", { class: "msg" }, note.msg)));
@@ -1577,7 +1579,6 @@ function duelPage(id) {
     // gave up: the word they didn't get, where it would have sat
     if (f && !f.found && v.secret) ol.append(el("li", { class: "missed", "data-key": `${p.id}:missed` }, el("span", { class: "n" }, ""), el("span", { class: "w" }, v.secret), el("span", { class: "s num" }, "100.00"), el("span", { class: "p" }, "😞")));
     for (const g of sorted) ol.append(row(g, p, v, false));
-    if (more > 0) ol.append(el("li", { class: "more", "data-key": `${p.id}:more` }, `+${more}`));
     if (v.collab) ol.querySelector(".heads")?.children[1].after(el("span", { class: "by" }, "Who"));
     div.append(ol);
     return div;
@@ -1601,7 +1602,8 @@ function duelPage(id) {
   }
 
   // Rows move rather than jump: before a redraw, where each row was (by key); after it, each one starts
-  // there and slides to its new place, and rows that are new fade in. Only what's on screen.
+  // there and slides to its new place, and rows that are new fade in. Only what's on screen (and, in a
+  // crowd's scrolling list, inside its box).
   function rowsAt() {
     const at = new Map();
     for (const li of document.querySelectorAll("#duel li[data-key]")) {
@@ -1615,9 +1617,11 @@ function duelPage(id) {
     for (const li of document.querySelectorAll("#duel li[data-key]")) {
       if (!li.offsetParent) continue;
       const now = li.getBoundingClientRect().top, was = before.get((li.closest("#rivals") ? "r:" : "b:") + li.dataset.key);
+      const box = li.closest(".others ol")?.getBoundingClientRect();
+      const lo = box ? Math.max(-60, box.top - li.offsetHeight) : -60, hi = box ? Math.min(h, box.bottom) : h;
       if (was === undefined) {
-        if (now > -60 && now < h) li.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: "ease-out" });
-      } else if (Math.abs(was - now) >= 1 && Math.min(was, now) < h && Math.max(was, now) > -60) {
+        if (now > lo && now < hi) li.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: "ease-out" });
+      } else if (Math.abs(was - now) >= 1 && Math.min(was, now) < hi && Math.max(was, now) > lo) {
         li.animate([{ transform: `translateY(${was - now}px)` }, { transform: "none" }], { duration: 170, easing: "cubic-bezier(.2,.7,.3,1)" });
       }
     }
