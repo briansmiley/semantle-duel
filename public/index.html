@@ -1645,7 +1645,7 @@ function duelPage(id) {
         f?.found ? el("span", { class: "mark num" }, `${ordinal(place)} · ${mmss(f.time)}`)
         : f ? el("span", { class: "mark" }, "gave up")
         : el("span", { class: "s num", style: b ? `color:${heat(b)}` : "" }, b ? b.score.toFixed(2) : "–"),
-        ...(!f && b ? [wordOf(b, p), proximity(b)] : []),
+        ...(!f && b ? [wordOf(b), proximity(b)] : []),
       );
       chip.onclick = () => { openRival = openRival === p.id ? null : p.id; render(); };
       return chip;
@@ -1670,7 +1670,7 @@ function duelPage(id) {
     const li = el("li", { "data-key": `${p.id}:${isLatest ? "latest" : key}`, class: [isLatest && "latest", lands && "landed", fresh && !lands && "fresh", isAgain && "again", g.shared && "shared", g.check && "check", v.secret && g.word === v.secret && "secret"].filter(Boolean).join(" ") });
     li.append(
       el("span", { class: "n num", title: g.shared ? "guessed by someone else too" : "" }, g.check ? "·" : g.n),
-      wordOf(g, p, g.hint && !v.collab ? tag("hint") : g.check ? tag("after") : ""),
+      wordOf(g, g.hint && !v.collab ? tag("hint") : g.check ? tag("after") : ""),
       ...(v.collab ? [el("span", { class: g.hint ? "by hint" : "by" }, g.hint ? "hint" : g.check ? "" : owner === me ? "you" : v.players.find((q) => q.id === owner)?.name ?? "")] : []),
       el("span", { class: "s num", style: `color:${heat(g)}` }, g.score.toFixed(2)),
       proximity(g),
@@ -1723,9 +1723,9 @@ addEventListener("pointerup", (e) => {
 });
 addEventListener("scroll", hideCut, true);
 
-// A guess's word. One you may not see yet is a run of x's to blur, the same length each time it's drawn.
-function wordOf(g, p, ...kids) {
-  return el("span", { class: "w" + (g.word ? "" : " hidden") }, el("span", { class: "t" }, g.word ?? "x".repeat(4 + ((g.n * 7 + p.id.charCodeAt(0)) % 6))), ...kids);
+// A guess's word. One you may not see yet is the same run of x's to blur, whatever the word, so it says nothing of its length.
+function wordOf(g, ...kids) {
+  return el("span", { class: "w" + (g.word ? "" : " hidden") }, el("span", { class: "t" }, g.word ?? "xxxxxxx"), ...kids);
 }
 
 // Semantle's proximity column: rank out of 1000 with a bar, or a temperature word.
