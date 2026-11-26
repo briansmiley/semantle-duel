@@ -1204,7 +1204,10 @@ function duelPage(id) {
   connect();
   // (a stream the browser gave up on, say on a 502 mid-deploy, is retried here too)
   setInterval(() => (es.readyState === EventSource.CLOSED || Date.now() - heard > 40_000) && connect(), 5_000);
-  document.addEventListener("visibilitychange", () => !document.hidden && Date.now() - heard > 20_000 && connect());
+  // back on the page: a phone may have dropped the stream while we were away, so don't wait for the watchdog
+  // (past 16s quiet, a ping is missing). A page back from the back/forward cache always reconnects.
+  document.addEventListener("visibilitychange", () => !document.hidden && (es.readyState !== EventSource.OPEN || Date.now() - heard > 16_000) && connect());
+  addEventListener("pageshow", (e) => e.persisted && connect());
 
   // tell the server we're still here (even from a background tab), so it can stop the
   // clock once everyone racing has actually disconnected
