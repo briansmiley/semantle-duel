@@ -116,6 +116,8 @@
   #lobby .who .others { display: contents; }
   #mine { display: inline-flex; align-items: baseline; gap: .3em; }
   #mine input { font-size: inherit; width: 8em; }
+  #mine .leavebtn { margin-left: .5em; color: var(--faint); font-size: .8em; align-self: center; }
+  #mine .leavebtn:hover { color: var(--ink); }
   #mine .joinbtn { margin-left: .5em; border-bottom: 2px solid var(--hot); padding-bottom: 1px; }
   #mine .pencil { color: var(--faint); align-self: center; display: grid; }
   #mine .pencil:hover { color: var(--ink); }
@@ -378,7 +380,7 @@
   <div id="tally" hidden></div>
   <div id="graph" hidden></div>
   <section id="lobby" hidden>
-    <div class="who"><span id="mine"><form id="nameform"><input class="line" id="name" placeholder="your name" maxlength="24" autocomplete="off"></form><span class="me"></span><button type="button" class="pencil" title="change your name" aria-label="change your name"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4"/></svg></button><button type="button" class="joinbtn">join</button></span><span class="others"></span></div>
+    <div class="who"><span id="mine"><form id="nameform"><input class="line" id="name" placeholder="your name" maxlength="24" autocomplete="off"></form><span class="me"></span><button type="button" class="pencil" title="change your name" aria-label="change your name"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4"/></svg></button><button type="button" class="joinbtn">join</button><button type="button" class="leavebtn">leave</button></span><span class="others"></span></div>
     <div class="mode"></div>
     <div><button id="go" disabled>ready</button><span class="wait"></span></div>
   </section>
@@ -1052,6 +1054,11 @@ function duelPage(id) {
     store.set("sd-name", name);
     join(name).then((r) => r.view && apply(r.view));
   };
+  $("#mine .leavebtn").onclick = () => {
+    clearTimeout(naming);  // a name still on its way up would put you back in
+    voice.leave();  // voice is for the players: out of it too, or your mic stays open with its bar hidden
+    post(`${base}/leave`, { player: me }).then((r) => r.view && apply(r.view));
+  };
   // Your name in the list follows the box as you type; everyone else sees it once you pause.
   let naming = null;
   $("#name").oninput = () => {
@@ -1163,6 +1170,7 @@ function duelPage(id) {
       const mine = v.players.find((p) => p.id === me);
       $("#mine").hidden = setting || (!mine && v.players.length >= v.max);
       $("#mine .joinbtn").hidden = !!mine;
+      $("#mine .leavebtn").hidden = !mine;
       $("#mine .me").replaceChildren($("#name").value.trim() || mine?.name || "", ...(mine ? [tick(mine)] : []));
       // someone whose page has closed: greyed, "away"; the server drops them if they don't come back soon
       const away = (p) => v.here && !v.here.includes(p.id);
