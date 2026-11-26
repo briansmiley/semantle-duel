@@ -187,7 +187,7 @@ export class Duel {
     if (!p) return "not in this duel";
     if (this.status(now) !== "playing" || p.finish) return "not playing";
     if (this.pause()) return "paused";
-    if (!/^[a-z][a-z'-]*$/.test(word)) return "not a word";
+    if (!/^[a-z][a-z'-]{0,29}$/.test(word)) return "not a word";
     if (this.taken(p).some((g) => g.word === word)) return "already guessed";
     return null;
   }
@@ -196,7 +196,7 @@ export class Duel {
   checkRefusal(playerId, word) {
     const p = this.players.get(playerId);
     if (!p?.finish) return "not finished";
-    if (!/^[a-z][a-z'-]*$/.test(word)) return "not a word";
+    if (!/^[a-z][a-z'-]{0,29}$/.test(word)) return "not a word";
     if (this.taken(p).some((g) => g.word === word) || p.checks?.some((c) => c.word === word)) return "already guessed";
     return null;
   }

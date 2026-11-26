@@ -369,7 +369,7 @@
     <button data-puzzle="set" class="quiet" title="you pick the word and watch">custom</button>
     <a href="/archive" class="quiet">archive</a>
   </nav>
-  <form id="setword" hidden><input class="line" placeholder="the secret word" maxlength="30" autocomplete="off" autocapitalize="off" spellcheck="false"><button>make the duel</button><span class="why"></span></form>
+  <form id="setword" hidden><input class="line" placeholder="the secret word" maxlength="30" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"><button>make the duel</button><span class="why"></span></form>
 </main>
 
 <main id="archive" hidden>
@@ -1694,7 +1694,7 @@ function duelPage(id) {
     // racing: guess; finished: keep checking words, just for their scores
     if (mine && v.players.some((q) => q.id === me) && (v.status === "playing" || v.status === "over")) {
       const form = el("form", {});
-      const input = el("input", { class: "line", id: "guess", placeholder: f ? "check a word" : "type a guess", autocomplete: "off", autocapitalize: "off", spellcheck: "false", enterkeyhint: "go" });
+      const input = el("input", { class: "line", id: "guess", placeholder: f ? "check a word" : "type a guess", autocomplete: "off", autocapitalize: "off", autocorrect: "off", maxlength: "30", spellcheck: "false", enterkeyhint: "go" });
       input.value = draft;
       input.oninput = () => (draft = input.value);
       const quit = el("button", { class: "giveup", type: "button" }, "give up");
