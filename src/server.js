@@ -98,6 +98,10 @@ async function score(word, secret) {
   return semantle.score(word, secret);
 }
 
+// Google's word2vec vectors (Semantle's too) leave out these four, so neither we nor Semantle can score them.
+const UNSCORED = new Set(["a", "and", "of", "to"]);
+const unknown = (word) => (UNSCORED.has(word) ? "semantle has no score for a, and, of or to" : "unknown word");
+
 function newId() {
   return randomBytes(4).toString("base64url").replace(/[-_]/g, "x").slice(0, 5).toLowerCase();
 }
@@ -316,7 +320,7 @@ async function handle(req, res) {
     if (why) return json(res, 409, { error: why });
     if (!room.scores.has(word)) room.scores.set(word, await score(word, duel.puzzle.secret));
     const result = room.scores.get(word);
-    if (!result) return json(res, 409, { error: "unknown word" });
+    if (!result) return json(res, 409, { error: unknown(word) });
     duel.check(player, word, result, Date.now());
   } else if (action === "guess") {
     const word = String(msg.word ?? "").trim().toLowerCase();
@@ -324,7 +328,7 @@ async function handle(req, res) {
     if (why) return json(res, 409, { error: why });
     if (!room.scores.has(word)) room.scores.set(word, await score(word, duel.puzzle.secret));
     const result = room.scores.get(word);
-    if (!result) return json(res, 409, { error: "unknown word" });
+    if (!result) return json(res, 409, { error: unknown(word) });
     duel.guess(player, word, result, Date.now());
   } else {
     return json(res, 404, { error: "not found" });
