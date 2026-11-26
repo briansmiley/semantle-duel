@@ -1094,6 +1094,7 @@ function duelPage(id) {
   let picking = false, today = null;  // rematch: choosing a puzzle
   let nextCollab = null;  // rematch: compete or collab, if changed from this round's
   let openRival = null;  // on a phone, whose list is open under the strip
+  let modeChanged = false;  // lobby: a compete/co-op switch cleared my ready, until I ready again
   fetch("/today").then((r) => r.json()).then((t) => { today = t.number; if (view) render(); }).catch(() => {});
 
   const join = (name) => post(`${base}/join`, { player: me, name });
@@ -1238,7 +1239,6 @@ function duelPage(id) {
     drawn = sig;
     render();
   }
-  let modeChanged = false;
   let drawn = null;  // what was last drawn, less the clock
 
   // Into the rematch's lobby, on this page: the finished round's state goes, as on a page opened afresh, and the
@@ -1319,9 +1319,13 @@ function duelPage(id) {
       const unready = v.players.filter((p) => !p.ready && p.id !== me).map((p) => p.name);
       // who asked you here and to what, until you've named yourself; and what a setter does
       const host = v.setter ?? v.players.find((p) => p.id !== me && p.name);
-      $("#lobby .intro").textContent = setting ? "send the link; you’ll watch every guess."
-        : host && !store.get("sd-name") ? `${host.name} invited you to ${v.collab ? "solve" : "race to"} ${v.mode === "random" ? "a random word" : v.mode === "set" ? "their word" : v.number === today ? "today’s Semantle word" : `Semantle #${v.number}`}.` : "";
-      $("#lobby .wait").textContent = !mine?.ready ? (modeChanged ? "mode changed: ready again." : "")
+      const what = v.mode === "random" ? "a random word" : v.mode === "set" ? "their word"
+        : v.number === today ? "today’s Semantle word" : `Semantle #${v.number}`;
+      const intro = setting ? "send the link; you’ll watch every guess."
+        : host && !store.get("sd-name") ? `${host.name} invited you to ${v.collab ? "solve" : "race to"} ${what}.` : "";
+      $("#lobby .intro").textContent = intro;
+      $("#lobby .intro").hidden = !intro;  // empty, it would still take a grid gap
+      $("#lobby .wait").textContent = !mine?.ready ? (mine && modeChanged ? "mode changed: ready again." : "")
         : v.players.length < 2 ? "waiting for an opponent…"
         : unready.length ? `waiting for ${unready.join(", ")}…` : "";
     }
