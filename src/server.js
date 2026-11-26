@@ -286,10 +286,14 @@ async function handle(req, res) {
   } else if (action === "ready") {
     if (duel.setReady(player, !!msg.ready, now)) setTimeout(() => broadcast(room), duel.startsAt - now + 10);
   } else if (action === "rematch") {
-    if (!duel.players.has(player)) throw new DuelError("not in this duel");
-    // first one to ask picks the puzzle, and compete or collab (unsaid: as this round); everyone else is pointed at the same duel
-    if (!duel.next) {
-      room.rematch ??= createDuel(msg.puzzle, duel.room, { mode: msg.mode, collab: msg.collab ?? duel.collab, avoid: [...(Array.isArray(msg.avoid) ? msg.avoid : []), duel.puzzle.secret] }).then((id) => (duel.next = id)).finally(() => (room.rematch = null));
+    // first one to ask proposes the puzzle, and compete or collab (unsaid: as this round); it's made once every player says yes
+    const random = msg.mode === "random";
+    const pick = random || msg.puzzle !== undefined
+      ? { puzzle: msg.puzzle, mode: msg.mode, collab: !!(msg.collab ?? duel.collab), avoid: random && Array.isArray(msg.avoid) ? msg.avoid.slice(0, 500).map(String) : undefined }
+      : null;  // only a yes (or no) to what's proposed
+    const agreed = duel.askRematch(player, msg.want !== false, pick, now);
+    if (agreed) {
+      room.rematch ??= createDuel(agreed.puzzle, duel.room, { mode: agreed.mode, collab: agreed.collab, avoid: [...(agreed.avoid ?? []), duel.puzzle.secret] }).then((id) => { duel.next = id; duel.rematch = null; }).finally(() => (room.rematch = null));
       await room.rematch;
     }
   } else if (action === "hint") {
