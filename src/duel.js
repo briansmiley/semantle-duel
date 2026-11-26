@@ -345,7 +345,7 @@ export class Duel {
           // someone else found their own way to this word too (scores give that away anyway)
           shared: !g.hint && [...this.players.values()].some((q) => q !== p && q.guesses.some((h) => h.word === g.word && !h.hint)),
         })),
-        checks: p.id === viewerId || reveal ? p.checks ?? [] : [],
+        checks: reveal ? p.checks ?? [] : [],  // only the finished have any, and they see everything
       })),
     };
   }

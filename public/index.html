@@ -1495,6 +1495,9 @@ function duelPage(id) {
       el("span", {}, el("b", {}, p.id === me ? "you" : p.name), " ", p.guesses.findLast((g) => !g.hint)?.word ?? "–")));
   }
 
+  // A player's list: their guesses and, among them, the words they checked after finishing, unnumbered.
+  const withChecks = (p) => [...p.guesses, ...(p.checks ?? []).map((c, k) => ({ ...c, n: null, k, check: true }))];
+
   function side(p, v) {
     const mine = p.id === me;
     const best = p.guesses.reduce((m, g) => Math.max(m, g.score), -Infinity);
@@ -1555,7 +1558,6 @@ function duelPage(id) {
     }
 
     const ol = el("ol", {});
-    // words checked after finishing sit among the guesses, unnumbered
     const all = withChecks(p);
     if (mine) pending = pending.filter((w) => !all.some((g) => g.word === w));
     if (mine && note && all.some((g) => g.word === note.word)) note = null;  // it got through after all
@@ -1625,9 +1627,6 @@ function duelPage(id) {
 
   // phone: everyone else in one strip (finished by place, then by best score), each still racing with their
   // best guess; tap a name for their list
-  // a player's guesses plus the words they checked after finishing, unnumbered
-  const withChecks = (p) => [...p.guesses, ...(p.checks ?? []).map((c, k) => ({ ...c, n: null, k, check: true }))];
-
   function strip(v, others, inIt) {
     const box = $("#rivals");
     box.hidden = !inIt || !others.length;
