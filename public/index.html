@@ -266,6 +266,8 @@
      its first letter ("h"), the rest wrapping onto a line that's hidden. Only then is the word cut. */
   li .w:has(small) .t { flex: 0 1 auto; }
   li .w:has(small) small { flex: 1 1 0; min-width: .8em; display: inline-flex; flex-wrap: wrap; max-height: 1.3em; overflow: hidden; }
+  /* the live stream is down (a deploy restarting the server, or the network): says so until it's back */
+  #away { position: fixed; z-index: 40; top: calc(env(safe-area-inset-top) + 2.9rem); left: 50%; translate: -50% 0; width: max-content; max-width: calc(100vw - 2rem); white-space: nowrap; margin: 0; padding: .25em .8em; background: var(--paper); color: var(--faint); border: 1px solid var(--rule); border-radius: 4px; box-shadow: 0 6px 24px rgb(0 0 0 / .14); font-size: .95rem; font-style: italic; text-align: center; }
   #cut { position: fixed; z-index: 30; max-width: 90vw; padding: .25em .6em; background: var(--ink); color: var(--paper); border-radius: 4px; font-size: .9rem; pointer-events: none; }
   li .w.hidden, .chip .w.hidden { filter: blur(5px); user-select: none; color: var(--faint); }
   li .s { text-align: right; }
@@ -385,6 +387,7 @@
     <button id="share" title="copy link">copy link</button>
   </header>
   <div id="voice" hidden></div>
+  <p id="away" role="status" hidden>server updating…</p>
   <div id="mic" hidden>
     <label title="how loud your mic goes out">sensitivity <input type="range" id="micgain" min="-12" max="12" step="1"></label>
     <label title="below this level nothing goes out: room noise and breathing stay here">floor <span class="gate"><input type="range" id="micfloor" min="-70" max="-20" step="1"><i></i></span></label>
@@ -1162,12 +1165,16 @@ function duelPage(id) {
   };
 
   // Live updates. Phones drop these streams silently (sleep, network switch), so the
-  // server pings every 15s and we reconnect when it's gone quiet.
-  let es = null, heard = 0;
+  // server pings every 15s and we reconnect when it's gone quiet. A stream down for more than a blip
+  // (a deploy restarts the server) shows #away until one opens again, then reloads the page. Only for a duel we've seen:
+  // a link to no duel never opens a stream, and that's not the server updating.
+  let es = null, heard = 0, away = null;
   const connect = () => {
     es?.close();
     heard = Date.now();
     es = new EventSource(`${base}/events?player=${encodeURIComponent(me)}`);
+    es.onopen = () => { clearTimeout(away); away = null; if (!$("#away").hidden) location.reload(); };  // after a real outage: reload for the deploy's new client code (voice carries over via pagehide)
+    es.onerror = () => { if (view && !away) away = setTimeout(() => ($("#away").hidden = false), 2_000); };
     es.onmessage = (e) => { heard = Date.now(); apply(JSON.parse(e.data)); };
     es.addEventListener("ping", () => (heard = Date.now()));
     es.addEventListener("signal", (e) => { heard = Date.now(); const m = JSON.parse(e.data); voice.onSignal(m.from, m.data); });
@@ -1195,7 +1202,8 @@ function duelPage(id) {
     sessionStorage.removeItem(VOICE_INTO);
   } catch {}
   connect();
-  setInterval(() => Date.now() - heard > 40_000 && connect(), 5_000);
+  // (a stream the browser gave up on, say on a 502 mid-deploy, is retried here too)
+  setInterval(() => (es.readyState === EventSource.CLOSED || Date.now() - heard > 40_000) && connect(), 5_000);
   document.addEventListener("visibilitychange", () => !document.hidden && Date.now() - heard > 20_000 && connect());
 
   // tell the server we're still here (even from a background tab), so it can stop the
