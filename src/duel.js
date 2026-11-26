@@ -58,8 +58,9 @@ export class Duel {
     return !!p && !p.finish && this.status(now) === "playing";
   }
 
+  /** When they last showed signs of life: a hint handed to them doesn't count. */
   lastHeard(p) {
-    return Math.max(this.startsAt ?? 0, this.seen[p.id] ?? 0, p.guesses.at(-1)?.at ?? 0);
+    return Math.max(this.startsAt ?? 0, this.seen[p.id] ?? 0, p.guesses.findLast((g) => !g.hint)?.at ?? 0);
   }
 
   /** A player showed signs of life. Ends a pause that started because everyone had left. Returns true if it changed anything visible. */

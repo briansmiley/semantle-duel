@@ -106,7 +106,7 @@ function newId() {
 // here (not saved): it goes out with every view, and the offers, answers and ICE candidates
 // between two of them are passed along the event stream, the sender stamped by us, never read.
 function viewOf(room, player, now) {
-  return { ...room.duel.viewFor(player, now), thresholds: marks.get(room.duel.puzzle.secret) ?? null, voice: [...room.voice].map(([id, v]) => ({ id, muted: v.muted })), here: present(room) };
+  return { ...room.duel.viewFor(player, now), thresholds: marks.get(room.duel.puzzle.secret) ?? null, voice: [...room.voice].map(([id, v]) => ({ id, muted: v.muted })), here: present(room), voters: voters(room, now).map((p) => p.id) };
 }
 
 /** The players with the page open right now. */
@@ -114,11 +114,35 @@ function present(room) {
   return [...room.duel.players.keys()].filter((id) => [...room.listeners].some((l) => l.player === id));
 }
 
-/** Who a hint or a co-op give-up waits for: those racing with the page open or heard from lately, so one who left can't hold it up. */
+/** Who a hint or a co-op give-up waits for: those racing and heard from lately (an open page says so every 10s), so one who left can't hold it up. */
 function voters(room, now) {
-  const here = new Set(present(room));
-  return room.duel.racers(now).filter((p) => here.has(p.id) || now - room.duel.lastHeard(p) < AWAY_MS);
+  return room.duel.racers(now).filter((p) => now - room.duel.lastHeard(p) < AWAY_MS);
 }
+
+/** Everyone counted has asked for a hint: give one. Returns why not, if none can be given; either way the asks are spent. */
+async function grantHint(room) {
+  const { duel } = room;
+  const best = duel.bestRank(Date.now());
+  if (best >= 999) { duel.hintAsks = []; return "nothing closer but the word itself"; }
+  if (room.hinting) return null;  // one is on its way
+  room.hinting = true;
+  try { await pickHint(duel, best); } finally { room.hinting = false; }
+  return null;
+}
+
+async function pickHint(duel, best) {
+  // Semantle's own hint, given the best rank among those still racing (about a quarter of the way to the word).
+  // Should that fail: a neighbour a third of the way there, by rank.
+  const near = await semantle.neighbours(duel.puzzle.secret);
+  const theirs = await semantle.hint(duel.puzzle.secret, best).catch(() => null);
+  const target = Math.min(999, best + Math.max(1, Math.ceil((999 - best) / 3)));
+  const pick = near.find((n) => n.word === theirs && n.rank > best) ?? near.filter((n) => n.rank >= target).sort((a, b) => a.rank - b.rank)[0];
+  if (pick) duel.giveHint(pick.word, pick, Date.now());
+  else duel.hintAsks = [];
+}
+
+/** All of `voters` are among `asks` (and there is someone to vote). */
+const allAsked = (asks, vs) => vs.length > 0 && vs.every((p) => asks.includes(p.id));
 
 // In a lobby, someone whose page has been gone this long is dropped from it, so a player who left can't hold
 // up the start. Long enough for a phone to switch apps and come back.
@@ -314,15 +338,8 @@ async function handle(req, res) {
   } else if (action === "hint") {
     if (duel.askHint(player, !!msg.want, now, voters(room, now))) {
       // Everyone agreed.
-      const best = duel.bestRank(now);
-      if (best >= 999) { duel.hintAsks = []; await save(duel); broadcast(room); return json(res, 409, { error: "nothing closer but the word itself" }); }
-      // Semantle's own hint, given the best rank among those still racing (about a quarter of the way to the word).
-      // Should that fail: a neighbour a third of the way there, by rank.
-      const near = await semantle.neighbours(duel.puzzle.secret);
-      const theirs = await semantle.hint(duel.puzzle.secret, best).catch(() => null);
-      const target = Math.min(999, best + Math.max(1, Math.ceil((999 - best) / 3)));
-      const pick = near.find((n) => n.word === theirs && n.rank > best) ?? near.filter((n) => n.rank >= target).sort((a, b) => a.rank - b.rank)[0];
-      if (pick) duel.giveHint(pick.word, pick, Date.now());
+      const why = await grantHint(room);
+      if (why) { await save(duel); broadcast(room); return json(res, 409, { error: why }); }
     }
   } else if (action === "guess" && duel.players.get(player)?.finish) {
     // finished: words are only checked, for their score, outside the race
@@ -350,11 +367,13 @@ async function handle(req, res) {
   return json(res, 200, { ok: true, view: viewOf(room, player, Date.now()) });
 }
 
-// Stop the clock in duels where everyone still playing has gone quiet; drop whoever has left a lobby.
+// Stop the clock in duels where everyone still playing has gone quiet; settle a vote whose last holdout has gone
+// quiet; drop whoever has left a lobby.
 setInterval(() => {
   const now = Date.now();
   for (const room of rooms.values()) {
     if (room.duel.checkAway(now)) save(room.duel).then(() => broadcast(room), console.error);
+    settleVotes(room, now).catch(console.error);
     if (room.duel.status(now) !== "lobby") { room.gone = null; continue; }
     room.gone ??= new Map();  // player -> since when their page has been gone
     const here = new Set(present(room));
@@ -370,6 +389,21 @@ setInterval(() => {
     if (dropped) save(room.duel).then(() => broadcast(room), console.error);
   }
 }, 5_000).unref();
+
+/** A hint or co-op give-up everyone still counted has asked for goes through, without anyone asking again. Also
+ * rebroadcasts when who counts changes, so pages stop waiting on (or start waiting on) the right people. */
+async function settleVotes(room, now) {
+  const { duel } = room;
+  const vs = voters(room, now);
+  const key = vs.map((p) => p.id).join();
+  const moved = room.voterKey !== undefined && key !== room.voterKey;
+  room.voterKey = key;
+  if (duel.collab && allAsked(duel.giveUpAsks, vs)) duel.finishAll(false, now);
+  else if (!duel.pause() && !room.hinting && allAsked(duel.hintAsks, vs)) await grantHint(room).catch((e) => { console.error(e); duel.hintAsks = []; });  // no retrying every 5s
+  else { if (moved) broadcast(room); return; }
+  await save(duel);
+  broadcast(room);
+}
 
 // Drop idle duels from memory; they stay on disk.
 setInterval(() => {
