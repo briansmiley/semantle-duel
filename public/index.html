@@ -1083,14 +1083,15 @@ function duelPage(id) {
 
   // Live updates. Phones drop these streams silently (sleep, network switch), so the
   // server pings every 15s and we reconnect when it's gone quiet. A stream down for more than a blip
-  // (a deploy restarts the server) shows #away until one opens again.
+  // (a deploy restarts the server) shows #away until one opens again. Only for a duel we've seen:
+  // a link to no duel never opens a stream, and that's not the server updating.
   let es = null, heard = 0, away = null;
   const connect = () => {
     es?.close();
     heard = Date.now();
-    const s = es = new EventSource(`${base}/events?player=${encodeURIComponent(me)}`);
+    es = new EventSource(`${base}/events?player=${encodeURIComponent(me)}`);
     es.onopen = () => { clearTimeout(away); away = null; $("#away").hidden = true; };
-    es.onerror = () => { if (s.readyState !== EventSource.OPEN && !away) away = setTimeout(() => ($("#away").hidden = false), 2_000); };
+    es.onerror = () => { if (view && !away) away = setTimeout(() => ($("#away").hidden = false), 2_000); };
     es.onmessage = (e) => { heard = Date.now(); apply(JSON.parse(e.data)); };
     es.addEventListener("ping", () => (heard = Date.now()));
     es.addEventListener("signal", (e) => { heard = Date.now(); const m = JSON.parse(e.data); voice.onSignal(m.from, m.data); });
