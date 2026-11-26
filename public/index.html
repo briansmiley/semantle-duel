@@ -1814,12 +1814,12 @@ function duelPage(id) {
     const key = (p) => (p.finish?.found ? order.indexOf(p) - 1e6 : p.finish ? 1e6 : -(best(p)?.score ?? -1e3));
     const sorted = [...others].sort((a, b) => key(a) - key(b));
     if (openRival && !others.some((p) => p.id === openRival)) openRival = null;
-    const lead = sorted[0];
+    const lead = sorted[0], mine = best(v.players.find((q) => q.id === me) ?? { guesses: [] });
     $("#rivals .strip").replaceChildren(...sorted.map((p) => {
       const f = p.finish, b = best(p), last = withChecks(p).reduce((a, g) => (!a || g.at >= a.at ? g : a), null);
       const place = f?.found ? order.indexOf(p) + 1 : 0;
       const fresh = last && seen !== null && !seen.has(`${p.id}:${last.check ? `c${last.k}` : last.n}`);
-      const first = place === 1 || (!order.some((q) => q.finish?.found) && p === lead && b);
+      const first = place === 1 || (!f && !order.some((q) => q.finish?.found) && p === lead && b && b.score > (mine?.score ?? -Infinity));
       const chip = el("button", { type: "button", class: ["chip", openRival === p.id && "on", fresh && "fresh", first && "first", f?.found && "found"].filter(Boolean).join(" ") },
         el("span", { class: "name" }, p.name),
         f?.found ? el("span", { class: "mark num" }, `${ordinal(place)} · ${mmss(f.time)}`)
