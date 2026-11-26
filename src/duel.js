@@ -308,19 +308,21 @@ export class Duel {
     if (open && [...this.players.values()].every((q) => q.finish)) open.to = now;
   }
 
-  /** What one viewer may see: everything once they've finished (or it's over), otherwise only scores of others. */
+  /** What one viewer may see: everything once they've finished having played (or it's over), otherwise only scores of others. */
   viewFor(viewerId, now) {
     const status = this.status(now);
-    const reveal = status === "over" || !!this.players.get(viewerId)?.finish || this.setter?.id === viewerId;
+    const viewer = this.players.get(viewerId);
+    // giving up straight after joining isn't a way to read the word: a give-up counts once you've guessed
+    const reveal = status === "over" || this.setter?.id === viewerId || (!!viewer?.finish && (viewer.finish.found || viewer.guesses.some((g) => !g.hint)));
     const ended = status === "over" ? this.endedAt() : now;
     const open = this.pause();
-    const mine = new Set(this.players.get(viewerId)?.guesses.map((g) => g.word));
+    const mine = new Set(viewer?.guesses.map((g) => g.word));
     return {
       id: this.id,
       number: this.puzzle.number,
       mode: this.puzzle.mode ?? "semantle",
       collab: this.collab,
-      setter: this.setter,
+      setter: this.setter && { name: this.setter.name, you: this.setter.id === viewerId },  // never their id: it would open their view
       status,
       now,
       startsAt: this.startsAt,
@@ -352,7 +354,7 @@ export class Duel {
           // someone else found their own way to this word too (scores give that away anyway)
           shared: !g.hint && [...this.players.values()].some((q) => q !== p && q.guesses.some((h) => h.word === g.word && !h.hint)),
         })),
-        checks: reveal ? p.checks ?? [] : [],  // only the finished have any, and they see everything
+        checks: reveal || p.id === viewerId ? p.checks ?? [] : [],  // only the finished have any: your own, and everyone's once you see everything
       })),
     };
   }
