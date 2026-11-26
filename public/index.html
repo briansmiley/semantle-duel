@@ -256,7 +256,7 @@
   li .w:has(small) .t { flex: 0 1 auto; }
   li .w:has(small) small { flex: 1 1 0; min-width: .8em; display: inline-flex; flex-wrap: wrap; max-height: 1.3em; overflow: hidden; }
   /* the live stream is down (a deploy restarting the server, or the network): says so until it's back */
-  #away { position: fixed; z-index: 40; top: max(.6rem, env(safe-area-inset-top)); left: 50%; translate: -50% 0; max-width: calc(100vw - 2rem); margin: 0; padding: .25em .8em; background: var(--paper); color: var(--faint); border: 1px solid var(--rule); border-radius: 4px; box-shadow: 0 6px 24px rgb(0 0 0 / .14); font-size: .95rem; font-style: italic; text-align: center; }
+  #away { position: fixed; z-index: 40; bottom: max(.8rem, env(safe-area-inset-bottom)); left: 50%; translate: -50% 0; width: max-content; max-width: calc(100vw - 2rem); margin: 0; padding: .25em .8em; background: var(--paper); color: var(--faint); border: 1px solid var(--rule); border-radius: 4px; box-shadow: 0 6px 24px rgb(0 0 0 / .14); font-size: .95rem; font-style: italic; text-align: center; }
   #cut { position: fixed; z-index: 30; max-width: 90vw; padding: .25em .6em; background: var(--ink); color: var(--paper); border-radius: 4px; font-size: .9rem; pointer-events: none; }
   li .w.hidden, .chip .w.hidden { filter: blur(5px); user-select: none; color: var(--faint); }
   li .s { text-align: right; }
