@@ -67,8 +67,8 @@ async function puzzle(number) {
   return puzzles.get(number);
 }
 
-// Score locally when we have the vectors and Semantle's top-1000 list for this
-// secret; otherwise (or for a word we don't know) ask Semantle per guess.
+// Score locally when we have the vectors and Semantle's top-1000 list for this secret; otherwise (or for a
+// word we don't know) ask Semantle per guess. Should Semantle be down, a word we know is scored without a rank.
 const local = vectors.load(process.env.VECTORS_DIR ?? `${DATA}/vectors`);
 const nearby = new Map(); // secret -> Promise<Map word -> rank>
 // secret -> the scores at ranks 1, 500 and 850 of that same list, for the finished round's chart. Every rank
@@ -91,11 +91,21 @@ function ranked(secret) {
 async function score(word, secret) {
   if (word === secret) return { score: 100, rank: 1000 };
   const v = await local;
-  if (v) {
-    const [sim, ranks] = await Promise.all([v.similarity(word, secret), ranked(secret).catch(() => null)]);
-    if (sim !== null && ranks) return { score: sim, rank: ranks.get(word) ?? null };
+  const sim = v && (await v.similarity(word, secret));
+  if (sim != null) {
+    const ranks = await ranked(secret).catch(() => null);
+    // Semantle is down: our score still holds (it matches theirs), just not where it ranks
+    return ranks ? { score: sim, rank: ranks.get(word) ?? null } : { score: sim, rank: null, rankless: true };
   }
   return semantle.score(word, secret);
+}
+
+/** The room's score for `word`, asked once; one scored without its rank is asked again next time. */
+async function scoreIn(room, word) {
+  if (room.scores.has(word)) return room.scores.get(word);
+  const result = await score(word, room.duel.puzzle.secret);
+  if (!result?.rankless) room.scores.set(word, result);
+  return result;
 }
 
 function newId() {
@@ -323,16 +333,14 @@ async function handle(req, res) {
     const word = String(msg.word ?? "").trim().toLowerCase();
     const why = duel.checkRefusal(player, word);
     if (why) return json(res, 409, { error: why });
-    if (!room.scores.has(word)) room.scores.set(word, await score(word, duel.puzzle.secret));
-    const result = room.scores.get(word);
+    const result = await scoreIn(room, word);
     if (!result) return json(res, 409, { error: unknown(word) });
     duel.check(player, word, result, Date.now());
   } else if (action === "guess") {
     const word = String(msg.word ?? "").trim().toLowerCase();
     const why = duel.refusal(player, word, now);
     if (why) return json(res, 409, { error: why });
-    if (!room.scores.has(word)) room.scores.set(word, await score(word, duel.puzzle.secret));
-    const result = room.scores.get(word);
+    const result = await scoreIn(room, word);
     if (!result) return json(res, 409, { error: unknown(word) });
     duel.guess(player, word, result, Date.now());
   } else {
