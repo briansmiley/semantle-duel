@@ -1142,6 +1142,10 @@ function duelPage(id) {
   $("#mine .standbtn").onclick = () => {
     stood = true;
     clearTimeout(naming);  // a rename still on its way would sit you back down
+    // like sit, standing up closes the name box; a name typed into it is kept for when you sit again
+    const typed = $("#name").value.trim();
+    if (typed) store.set("sd-name", typed);
+    editing = false; showMine();
     post(`${base}/leave`, { player: me }).then((r) => {
       if (!r.view) return;
       if (!r.view.players.some((p) => p.id === me)) voice.leave();  // (not if the round began first: then you're still in it)
