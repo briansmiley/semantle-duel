@@ -1084,7 +1084,7 @@ async function openDuel(code) {
 function duelPage(id) {
   $("#duel").hidden = false;
   let base = `/d/${id}`;  // (both change when the page moves on to a rematch: see into)
-  let view = null, skew = 0, seen = null, draft = "", pending = [];  // pending: my guesses sent but not yet scored
+  let view = null, skew = 0, seen = null, pending = [];  // pending: my guesses sent but not yet scored
    // seen: guesses already drawn, so only new ones flash
   let sort = { by: "score", dir: -1 };  // the lists' order: a column of SORTS, and which way (-1: high to low). Best first to start
   let recall = null, flashRecall = false;  // a word I'd already guessed: shown up top again, like Semantle does
@@ -1236,7 +1236,7 @@ function duelPage(id) {
     history.replaceState(null, "", `/d/${view.room}`);
     id = next; base = `/d/${id}`;
     view = currentView = null; drawn = null; greeted = false; stood = false;
-    seen = null; draft = ""; pending = []; recall = null; flashRecall = false; note = null;
+    seen = null; input.value = ""; pending = []; recall = null; flashRecall = false; note = null;
     picking = false; nextCollab = null; openRival = null;
     editing = !store.get("sd-name"); showMine();
     chart = { open: false, x: "t", y: "best", hide: new Set(), picking: false };
@@ -1338,14 +1338,19 @@ function duelPage(id) {
     board.classList.toggle("together", !!v.collab);
     board.classList.toggle("crowd", sides.length > 2);
     board.classList.toggle("mine", inIt);
-    const focused = document.activeElement?.id === "guess";
+    const fresh = !input.isConnected || input.disabled;
     // a crowd: the first (you) on the left, everyone else stacked beside
     const drawn = sides.map((p) => side(p, v));
     const before = rowsAt();
     // A crowd's lists scroll in their own boxes, and a box being dragged or gliding stops dead if it's swapped
     // for a new one. So each opponent's box (and everything round it) stays put, and only what's in it is redrawn.
     const others = board.querySelector(":scope > .others");
-    if (sides.length <= 2 || !others) board.replaceChildren(...(sides.length > 2 ? [drawn[0], el("div", { class: "others" }, ...drawn.slice(1))] : drawn));
+    if (sides.length <= 2 || !others) {
+      // (yours may be the side already there, kept for its box)
+      for (const n of [...board.childNodes]) if (n !== drawn[0]) n.remove();
+      const kids = sides.length > 2 ? [drawn[0], el("div", { class: "others" }, ...drawn.slice(1))] : drawn;
+      board.append(...kids.slice(board.firstChild ? 1 : 0));
+    }
     else {
       const want = drawn.slice(1).map((s) => {
         const was = [...others.children].find((c) => c.dataset.id === s.dataset.id), box = was?.querySelector(":scope > ol");
@@ -1365,14 +1370,15 @@ function duelPage(id) {
         others.insertBefore(s, others.children[i] ?? null);
         box.scrollTop = y;
       });
-      for (const c of [...board.children]) if (c !== others) c.remove();
-      others.before(drawn[0]);
+      for (const c of [...board.children]) if (c !== others && c !== drawn[0]) c.remove();
+      if (others.previousElementSibling !== drawn[0]) others.before(drawn[0]);
     }
     strip(v, sides.filter((p) => p.id !== me), inIt);
     glide(before);
     seen = new Set(v.players.flatMap((p) => [...p.guesses.map((g) => `${p.id}:${g.n}`), ...(p.checks ?? []).map((c, k) => `${p.id}:c${k}`)]));
     flashRecall = false;
-    if (focused || (v.status === "playing" && inIt && !matchMedia("(hover: none)").matches)) $("#guess")?.focus({ preventScroll: true });  // a redraw keeps the box focused but never scrolls you back up to it
+    // the box is focused as it comes up to type in, not on every redraw (which would pull you back from anything else), never scrolling you up to it
+    if (fresh && v.status === "playing" && inIt && !matchMedia("(hover: none)").matches) input.focus({ preventScroll: true });
   }
 
   function pausebar(v, mine) {
@@ -1675,6 +1681,41 @@ function duelPage(id) {
   // A player's list: their guesses and, among them, the words they checked after finishing, unnumbered.
   const withChecks = (p) => [...p.guesses, ...(p.checks ?? []).map((c, k) => ({ ...c, n: null, k: c.k ?? k, check: true }))];
 
+  // Your box to type in is made once and kept on the page, its side redrawn round it (see side): one built afresh
+  // on every update would move the caret, lose a phone keyboard's word in progress, and undo a give-up's "sure?".
+  const input = el("input", { class: "line", id: "guess", autocomplete: "off", autocapitalize: "off", spellcheck: "false", enterkeyhint: "go" });
+  const submit = el("button", { class: "submit", type: "submit" }, "guess");
+  submit.onpointerdown = (e) => e.preventDefault();  // keep the keyboard up on phones
+  const quit = el("button", { class: "giveup", type: "button" }, "give up");
+  quit.onclick = () => {
+    if (quit.dataset.sure) return post(`${base}/giveup`, { player: me }).then((r) => r.view && apply(r.view));
+    quit.dataset.sure = 1; quit.textContent = "sure?";
+    setTimeout(() => { delete quit.dataset.sure; quit.textContent = "give up"; }, 2500);
+  };
+  const form = el("form", {}, input, submit, quit), spot = new Comment();  // spot: where the box goes in a side redrawn
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const word = input.value.trim().toLowerCase();
+    if (!word) return;
+    input.value = "";
+    note = null; recall = null;
+    const mineNow = view.players.find((q) => q.id === me);
+    const known = [...(view.collab ? view.players.flatMap((q) => q.guesses) : mineNow?.guesses ?? []), ...(mineNow?.checks ?? [])];
+    if (known.some((g) => g.word === word)) { recall = word; flashRecall = true; return render(); }
+    if (pending.includes(word)) return render();
+    pending.push(word); render();
+    const round = id;
+    const r = await post(`${base}/guess`, { player: me, word });
+    if (id !== round) return;  // the page has moved on to a rematch: whatever came of this word was the last round's
+    pending = pending.filter((w) => w !== word);
+    if (r.view) apply(r.view);  // draws it (once), unless the event stream already did
+    if (!r.ok) {
+      if (r.error === "already guessed") { recall = word; flashRecall = true; }
+      else note = { word, msg: r.error === "upstream trouble" ? "server hiccup, try again" : r.error ?? "try again" };
+      render();
+    } else if (!r.view) render();
+  };
+
   function side(p, v) {
     const mine = p.id === me;
     const best = p.guesses.reduce((m, g) => Math.max(m, g.score), -Infinity);
@@ -1693,44 +1734,11 @@ function duelPage(id) {
 
     // racing: guess; finished: keep checking words, just for their scores
     if (mine && v.players.some((q) => q.id === me) && (v.status === "playing" || v.status === "over")) {
-      const form = el("form", {});
-      const input = el("input", { class: "line", id: "guess", placeholder: f ? "check a word" : "type a guess", autocomplete: "off", autocapitalize: "off", spellcheck: "false", enterkeyhint: "go" });
-      input.value = draft;
-      input.oninput = () => (draft = input.value);
-      const quit = el("button", { class: "giveup", type: "button" }, "give up");
-      quit.onclick = () => {
-        if (quit.dataset.sure) return post(`${base}/giveup`, { player: me });
-        quit.dataset.sure = 1; quit.textContent = "sure?";
-        setTimeout(() => { delete quit.dataset.sure; quit.textContent = "give up"; }, 2500);
-      };
-      const submit = el("button", { class: "submit", type: "submit" }, "guess");
-      submit.onpointerdown = (e) => e.preventDefault();  // keep the keyboard up on phones
-      if (v.paused && !f) { input.disabled = true; submit.disabled = true; }
-      if (f) submit.textContent = "check";
-      form.append(input, submit, f || v.collab ? "" : quit);  // (co-op: giving up is a vote, up by the clock)
-      form.onsubmit = async (e) => {
-        e.preventDefault();
-        const word = input.value.trim().toLowerCase();
-        if (!word) return;
-        draft = ""; input.value = "";
-        note = null; recall = null;
-        const mineNow = view.players.find((q) => q.id === me);
-        const known = [...(view.collab ? view.players.flatMap((q) => q.guesses) : mineNow?.guesses ?? []), ...(mineNow?.checks ?? [])];
-        if (known.some((g) => g.word === word)) { recall = word; flashRecall = true; return render(); }
-        if (pending.includes(word)) return render();
-        pending.push(word); render();
-        const round = id;
-        const r = await post(`${base}/guess`, { player: me, word });
-        if (id !== round) return;  // the page has moved on to a rematch: whatever came of this word was the last round's
-        pending = pending.filter((w) => w !== word);
-        if (r.view) apply(r.view);  // draws it (once), unless the event stream already did
-        if (!r.ok) {
-          if (r.error === "already guessed") { recall = word; flashRecall = true; }
-          else note = { word, msg: r.error === "upstream trouble" ? "server hiccup, try again" : r.error ?? "try again" };
-          render();
-        } else if (!r.view) render();
-      };
-      div.append(form);
+      input.placeholder = f ? "check a word" : "type a guess";
+      input.disabled = submit.disabled = !!v.paused && !f;
+      submit.textContent = f ? "check" : "guess";
+      quit.hidden = !!(f || v.collab);  // (co-op: giving up is a vote, up by the clock)
+      div.append(form.isConnected ? spot : form);
     } else if (!mine && v.players.length === 2 && v.players.some((q) => q.id === me) && (v.status === "playing" || v.status === "over")) {
       // side by side: an empty stand-in for the box, so both lists start at the same height
       div.append(el("form", { class: "slot", "aria-hidden": "true" }, el("input", { class: "line", tabindex: "-1", disabled: "disabled" }), el("button", { class: "submit", type: "button", tabindex: "-1" }, "guess")));
@@ -1757,7 +1765,14 @@ function duelPage(id) {
     for (const g of sorted) ol.append(row(g, p, v, false));
     if (v.collab) ol.querySelector(".heads")?.children[1].after(el("span", { class: "by" }, "Who"));
     div.append(ol);
-    return div;
+    if (spot.parentNode !== div) return div;
+    // the box is on the page already: its side stays too, and only what's round the box is swapped
+    const was = form.parentNode, kids = [...div.childNodes], i = kids.indexOf(spot);
+    was.className = div.className;
+    for (const n of [...was.childNodes]) if (n !== form) n.remove();
+    form.before(...kids.slice(0, i));
+    form.after(...kids.slice(i + 1));
+    return was;
   }
 
   // The list's order, one choice for every list on the page. A column starts in its natural direction
