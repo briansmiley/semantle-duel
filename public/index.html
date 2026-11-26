@@ -520,7 +520,7 @@ function pastList(rooms) {
         el("span", { class: "num" }, `${n} ${n === 1 ? "round" : "rounds"}${wins ? ` · ${wins} won` : ""}`),
         el("span", { class: d.place === 1 ? "w" : "" },
           d.found === true ? `${d.place ? ordinal(d.place) : "found"} · ${d.secret}`
-          : d.found === false ? `gave up · ${d.secret}` : "in progress"),
+          : d.found === false ? `gave up${d.secret ? ` · ${d.secret}` : ""}` : "in progress"),
       ),
     );
   }));

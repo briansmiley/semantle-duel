@@ -12,7 +12,7 @@ const ABANDON_MS = 24 * 3600_000; // a started duel with no moves this long ends
 export const AWAY_MS = Number(process.env.AWAY_MS ?? 90_000);
 
 /** @typedef {{n:number, word:string, score:number, rank:number|null, at:number, hint?:boolean}} Guess  hint: given to everyone, agreed on */
-/** @typedef {{word:string, score:number, rank:number|null, at:number}} Check  a word scored after finishing; shown to whoever may see everything (finished, setter, round over), not to those still racing */
+/** @typedef {{word:string, score:number, rank:number|null, at:number}} Check  a word scored after finishing; shown to their owner, and to whoever may see everything (finished having played, setter, round over), not to those still racing */
 /** @typedef {{at:number, found:boolean}} Finish */
 /** @typedef {{from:number, to:number|null, by:string|null}} Pause  by: who pressed pause, or null when everyone left */
 /** @typedef {{by:string, puzzle?:number, mode?:string, collab:boolean, avoid?:string[], asks:string[]}} Rematch  proposed, not yet made; asks: who has said yes */
