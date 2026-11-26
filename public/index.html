@@ -488,8 +488,12 @@ async function roomsNow() {
   const rooms = myRooms().slice(0, 40);
   const heads = await Promise.all(rooms.map((r) =>
     fetch(`/d/${r.room}/head?player=${encodeURIComponent(me)}`).then((x) => x.json()).catch(() => null)));
+  // rooms the server has cleared out: forget them (not on network errors, which give no answer)
+  const gone = new Set(rooms.filter((r, i) => heads[i]?.error === "no such duel").map((r) => r.room));
+  if (gone.size) store.set("sd-history", JSON.stringify(pastDuels().filter((d) => !gone.has(d.room ?? d.id))));
   const merged = new Map();  // head's room (or the room itself) -> room
   rooms.forEach((r, i) => {
+    if (gone.has(r.room)) return;
     const h = heads[i]?.id ? heads[i] : null, key = h?.room ?? h?.id ?? r.room;
     const m = merged.get(key);
     if (!m) return merged.set(key, { ...r, room: h?.room ?? r.room, others: new Set(r.others), h });
