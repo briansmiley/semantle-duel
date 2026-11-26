@@ -118,7 +118,7 @@
   #mine input { font-size: inherit; width: 8em; }
   #mine .joinbtn { margin-left: .5em; border-bottom: 2px solid var(--hot); padding-bottom: 1px; }
   #mine .spectating { margin-left: .5em; color: var(--faint); font-style: italic; font-size: .8em; }
-  #mine .standbtn { margin-left: .5em; color: var(--faint); font-size: .7em; }
+  #mine .standbtn { margin-left: .5em; color: var(--faint); font-size: .7em; align-self: center; }
   #mine .standbtn:hover { color: var(--ink); }
   #mine .pencil { color: var(--faint); align-self: center; display: grid; }
   #mine .pencil:hover { color: var(--ink); }
@@ -143,6 +143,8 @@
   #board .others .side { font-size: .82rem; }
   #board .others .side li.heads { display: none; }
   #board .others .side h2 { font-size: 1.05rem; }
+  /* each opponent's whole list, in a box about nine rows high that scrolls, so one long list can't push the rest away */
+  #board .others .side ol { max-height: 20em; overflow-y: auto; }
   #rivals { display: none; }
   @media (max-width: 700px) {
     /* minmax(0, …): a bare 1fr would grow to its widest row and run off the screen */
@@ -189,6 +191,15 @@
   #after .quiet { color: var(--faint); }
   #after .pick { display: contents; }
   #after .pick span { color: var(--faint); }
+  /* the rematch's puzzle choices read like the co-op toggle: faint until hovered, the picked one lit and underlined */
+  #after .pick button, #after .pick a { color: var(--faint); border-bottom-color: transparent; }
+  @media (hover: hover) { #after .pick button:not(:disabled):hover, #after .pick a:hover, #after .modes button:not(:disabled):hover { color: var(--ink); } }  /* no sticky hover after a tap */
+  #after .pick [aria-pressed="true"] { color: var(--ink); border-bottom-color: var(--hot); }
+  #after .pick button:disabled { cursor: default; }
+  #after .row { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: baseline; gap: .6rem 1.6rem; }  /* the rematch picker: a row of its own */
+  #after .row .pick { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: .6rem 1.6rem; }
+  /* a phone: compete / co-op on one line, the three puzzles on the next, no bar between */
+  @media (max-width: 640px) { #after .row .pick { flex-basis: 100%; gap: .6rem 1.2rem; } #after .row .pick > span[aria-hidden] { display: none; } }
   #tally { margin: .3rem 0 .6rem; color: var(--faint); font-size: .95rem; display: grid; gap: .15rem; }
   #tally b { font-weight: 400; color: var(--ink); }
   #tally .lead b { color: var(--hot); }
@@ -521,16 +532,16 @@ function openList(rooms) {
   ))));
 }
 
-// Going into a rematch while in voice: the rematch's page joins voice by itself (set by the duel page).
-let intoRematch = () => {};
 const VOICE_INTO = "sd-voice-into";  // sessionStorage: "<duel id>|<when>": this tab was in voice, heading into (or reloading) that duel
 
-// Rematch a finished duel on this puzzle; whoever asks first sets it up, and everyone lands in the same one.
+// Propose a rematch of a finished duel on this puzzle; whoever asks first sets it, and it's made once every player
+// has said yes. Nobody is moved off the finished round: returns its view, with the proposal in it (someone else's,
+// still to be answered, if they asked first).
 async function rematch(id, puzzle, button, mode, collab) {
   button.disabled = true;
   const r = await post(`/d/${id}/rematch`, { player: me, puzzle, mode, collab, avoid: mode === "random" ? playedWords() : undefined });
-  // the room's link: it opens the rematch
-  if (r.view?.next) { intoRematch(r.view.next); location.href = `/d/${r.view.room ?? r.view.next}`; } else button.disabled = false;
+  if (!r.view) button.disabled = false;
+  return r.view;
 }
 
 async function newDuel(puzzle, button, extra = {}) {
@@ -690,9 +701,12 @@ let currentView = null;  // the duel on screen, if any
     d.classList.toggle("tight", vv.height < fullHeight + 8);
   };
   const follow = () => { if (!vv) return; vv.addEventListener("resize", fit); vv.addEventListener("scroll", fit); fit(); };
-  d.addEventListener("close", () => { vv?.removeEventListener("resize", fit); vv?.removeEventListener("scroll", fit); place(null); d.classList.remove("tight"); });
-  // cancel throws the draft away; a tap outside only puts it aside
-  $("#report .cancel").onclick = () => { ta.value = ""; setImage(null); d.close(); };
+  // however it closes (cancel, Escape, a tap outside), the draft goes with it; one still sending is kept for its retry
+  d.addEventListener("close", () => {
+    vv?.removeEventListener("resize", fit); vv?.removeEventListener("scroll", fit); place(null); d.classList.remove("tight");
+    if (!sending) { ta.value = ""; setImage(null); }
+  });
+  $("#report .cancel").onclick = () => d.close();
 
   // A screenshot, picked, dropped or pasted: shrunk to a JPEG no bigger than 1600px on its longer side.
   let image = null;
@@ -716,7 +730,10 @@ let currentView = null;  // the duel on screen, if any
   d.addEventListener("paste", (e) => { const f = imageIn(e.clipboardData.files); if (f) { e.preventDefault(); attach(f); } });
   d.addEventListener("dragover", (e) => e.preventDefault());
   d.addEventListener("drop", (e) => { e.preventDefault(); attach(imageIn(e.dataTransfer.files)); });
-  d.onclick = (e) => { if (e.target === d) d.close(); };  // tap outside (braces: an onclick returning false would cancel the send)
+  // tap outside, but not a drag (selecting text) that only ends there (braces: an onclick returning false would cancel the send)
+  let pressedOutside = false;
+  d.addEventListener("pointerdown", (e) => (pressedOutside = e.target === d));
+  d.onclick = (e) => { if (e.target === d && pressedOutside) d.close(); };
   $("#report form").onsubmit = async (e) => {
     e.preventDefault();
     if (!ta.value.trim()) return ta.focus();
@@ -970,7 +987,8 @@ async function archivePage() {
     const b = el("button", { class: played.has(n) ? "played" : "", title: played.has(n) ? "played" : "" },
       el("b", { class: "num" }, `#${n}`),
       el("small", {}, d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })));
-    b.onclick = () => (rematchOf ? rematch(rematchOf, n, b, undefined, collabNext === null ? undefined : collabNext === "1") : newDuel(n, b));
+    // a rematch proposed: back to the finished round to wait for the others (just that one, should it already be made)
+    b.onclick = () => (rematchOf ? rematch(rematchOf, n, b, undefined, collabNext === null ? undefined : collabNext === "1").then((v) => v && (location.href = `/d/${rematchOf}?round`)) : newDuel(n, b));
     months.get(key).push(b);
   }
   $("#archive .months").replaceChildren(...[...months].flatMap(([m, bs]) => [el("h3", {}, m), el("div", { class: "grid" }, ...bs)]));
@@ -1040,11 +1058,15 @@ function duelPage(id) {
     store.set("sd-name", name);
     join(name).then((r) => r.view && apply(r.view));
   };
-  // Standing up takes you out of voice too (the server has done its side): it's for the players, and its bar goes with your seat.
+  // Standing up is leaving the lobby to watch. Out of voice too: it's for the players, and its bar goes with your seat.
   $("#mine .standbtn").onclick = () => {
     stood = true;
     clearTimeout(naming);  // a rename still on its way would sit you back down
-    post(`${base}/stand`, { player: me }).then((r) => { if (r.view) { voice.leave(false); apply(r.view); } });
+    post(`${base}/leave`, { player: me }).then((r) => {
+      if (!r.view) return;
+      if (!r.view.players.some((p) => p.id === me)) voice.leave();  // (not if the round began first: then you're still in it)
+      apply(r.view);
+    });
   };
   // Your name in the list follows the box as you type; everyone else sees it once you pause.
   let naming = null;
@@ -1081,7 +1103,6 @@ function duelPage(id) {
   const carry = (into) => { try { if (voice.state.status === "on") sessionStorage.setItem(VOICE_INTO, `${into}|${Date.now()}`); } catch {} };
   addEventListener("pagehide", () => { try { if (!sessionStorage.getItem(VOICE_INTO)) carry(id); } catch {} });
   const voice = voiceChat(base, () => view && voiceBar(view));
-  intoRematch = carry;
   let rejoinVoice = false;  // join once we're a player here
   try {
     const [into, at] = (sessionStorage.getItem(VOICE_INTO) ?? "").split("|");
@@ -1210,7 +1231,32 @@ function duelPage(id) {
     // a crowd: the first (you) on the left, everyone else stacked beside
     const drawn = sides.map((p) => side(p, v));
     const before = rowsAt();
-    board.replaceChildren(...(sides.length > 2 ? [drawn[0], el("div", { class: "others" }, ...drawn.slice(1))] : drawn));
+    // A crowd's lists scroll in their own boxes, and a box being dragged or gliding stops dead if it's swapped
+    // for a new one. So each opponent's box (and everything round it) stays put, and only what's in it is redrawn.
+    const others = board.querySelector(":scope > .others");
+    if (sides.length <= 2 || !others) board.replaceChildren(...(sides.length > 2 ? [drawn[0], el("div", { class: "others" }, ...drawn.slice(1))] : drawn));
+    else {
+      const want = drawn.slice(1).map((s) => {
+        const was = [...others.children].find((c) => c.dataset.id === s.dataset.id), box = was?.querySelector(":scope > ol");
+        if (!box) return s;
+        const ol = s.querySelector(":scope > ol");
+        was.className = s.className;
+        box.replaceChildren(...ol.childNodes);
+        for (const n of [...was.childNodes]) if (n !== box) n.remove();
+        box.before(...[...s.childNodes].filter((n) => n !== ol));
+        return was;
+      });
+      for (const c of [...others.children]) if (!want.includes(c)) c.remove();
+      want.forEach((s, i) => {
+        if (others.children[i] === s) return;
+        // someone moved up the standings: their box is re-placed, which ends a scroll but not where it was
+        const box = s.querySelector(":scope > ol"), y = box.scrollTop;
+        others.insertBefore(s, others.children[i] ?? null);
+        box.scrollTop = y;
+      });
+      for (const c of [...board.children]) if (c !== others) c.remove();
+      others.before(drawn[0]);
+    }
     strip(v, sides.filter((p) => p.id !== me), inIt);
     glide(before);
     seen = new Set(v.players.flatMap((p) => [...p.guesses.map((g) => `${p.id}:${g.n}`), ...(p.checks ?? []).map((c, k) => `${p.id}:c${k}`)]));
@@ -1240,13 +1286,13 @@ function duelPage(id) {
   // In co-op, so is giving up: it ends the round for the room.
   const giveUpVote = (v) => vote(v, v.giveUpAsks ?? [], { action: "askgiveup", label: "give up", asking: "asked to give up", wants: "to give up" });
 
-  function vote(v, asks, { action, label, asking, wants }) {
+  function vote(v, asks, { action, label, asking, wants, voters = v.players.filter((p) => !p.finish) }) {
     const ask = (want, text) => {
       const b = el("button", { type: "button" }, text);
       b.onclick = () => post(`${base}/${action}`, { player: me, want }).then((r) => { if (r.view) apply(r.view); if (!r.ok && r.error) { note = { word: label, msg: r.error }; render(); } });
       return b;
     };
-    const others = v.players.filter((p) => p.id !== me && !p.finish);
+    const others = voters.filter((p) => p.id !== me);
     const asked = others.filter((p) => asks.includes(p.id)).map((p) => p.name);
     const notYet = others.filter((p) => !asks.includes(p.id)).map((p) => p.name);
     if (asks.includes(me)) return [el("span", {}, `${asking}, waiting for ${notYet.join(", ")}`), ask(false, "cancel")];
@@ -1312,34 +1358,50 @@ function duelPage(id) {
     box.replaceChildren(line1, ...(vs.length ? [el("span", {}, "you ", vs.join(" · "))] : []));
   }
 
+  // The rematch picker, a row of its own: compete or co-op | a random word, today's, the archive. Once proposed (`on`:
+  // which was picked), it's shown as it was left, nothing clickable, the pick lit, and `then` (the vote) after it.
+  function picker(v, collab, on, puzzle, then = []) {
+    const choice = (tag, label, key, propose) => {
+      const b = el(tag, tag === "a" && !on ? { href: propose } : { type: "button", "aria-pressed": String(on === key) }, label);
+      if (tag === "button") { b.disabled = !!on; if (!on) b.onclick = async () => { const [puzzle, mode] = await propose(); rematch(v.id, puzzle, b, mode, collab).then((nv) => nv && apply(nv)); }; }
+      return b;
+    };
+    return el("div", { class: "row" }, modeToggle(collab, on ? null : (c) => { nextCollab = c; render(); }), el("span", { class: "pick" },
+      el("span", { "aria-hidden": "true" }, "|"),
+      choice("button", "a random word", "random", async () => [undefined, "random"]),
+      today && (today !== v.number || on === "today") ? choice("button", "today’s", "today", async () => [today]) : "",
+      on ? (on === "archive" ? choice("button", `#${puzzle}`, "archive") : choice("button", "the archive", "")) : choice("a", "the archive", "", `/archive?rematch=${v.id}&collab=${collab ? 1 : 0}`),
+    ), ...then);
+  }
+
   // once you're done: rematch (same opponents, a puzzle of your choosing) or home
   function after(v, mine) {
     const nav = $("#after");
     nav.hidden = !(mine ? mine.finish : v.status === "over");
     if (nav.hidden) return;
     const kids = [];
+    if (v.next || v.rematch) picking = false;  // (so a withdrawn proposal leaves just "rematch")
     if (v.next) {
-      const a = el("a", { href: `/d/${v.room}`, class: "lead" }, "join the rematch →");
-      a.onclick = () => intoRematch(v.next);
+      // everyone said yes: it's made, and in its lobby you ready up as ever
+      const a = el("a", { href: `/d/${v.room}`, class: "lead" }, "on to the rematch →");
+      a.onclick = () => carry(v.next);
       kids.push(a);
-    }
-    else if (mine && v.players.length > 1 && !picking) {
+    } else if (v.rematch && mine && v.rematch.by === me) {
+      // you proposed it: the picker stays as you left it, with your pick lit, and the vote after it
+      const r = v.rematch;
+      const on = r.mode === "random" ? "random" : !r.puzzle || r.puzzle === today ? "today" : "archive";
+      kids.push(picker(v, r.collab, on, r.puzzle, vote(v, r.asks, { action: "rematch", label: "rematch", asking: "rematch proposed", wants: "", voters: v.players })));
+    } else if (v.rematch && mine) {
+      // someone else proposed: a vote of this round's players, like a hint
+      const r = v.rematch;
+      const what = `${r.collab ? "co-op" : "compete"} rematch${r.mode === "random" ? " on a random word" : !r.puzzle || r.puzzle === today ? " on today’s" : ` on #${r.puzzle}`}`;
+      kids.push(...vote(v, r.asks, { action: "rematch", label: "rematch", asking: `said yes to a ${what}`, wants: `a ${what}`, voters: v.players }));
+    } else if (mine && v.players.length > 1 && !picking) {
       const b = el("button", { class: "lead", type: "button" }, "rematch");
       b.onclick = () => { picking = true; render(); };
       kids.push(b);
     } else if (mine && v.players.length > 1) {
-      const collab = nextCollab ?? !!v.collab;  // as this round, unless changed
-      const go = (label, puzzle) => {
-        const b = el("button", { type: "button" }, label);
-        b.onclick = async () => rematch(v.id, await puzzle(), b, undefined, collab);
-        return b;
-      };
-      kids.push(modeToggle(collab, (c) => { nextCollab = c; render(); }), el("span", { class: "pick" },
-        el("span", {}, "rematch on"),
-        (() => { const b = el("button", { type: "button" }, "a random word"); b.onclick = () => rematch(v.id, undefined, b, "random", collab); return b; })(),
-        today && today !== v.number ? go("today’s", async () => today) : "",
-        el("a", { href: `/archive?rematch=${v.id}&collab=${collab ? 1 : 0}` }, "the archive"),
-      ));
+      kids.push(picker(v, nextCollab ?? !!v.collab));  // as this round, unless changed
     }
     if (v.status === "over" && v.players.some((p) => p.guesses.some((g) => !g.hint))) {
       const b = el("button", { type: "button", class: "quiet", "aria-expanded": String(chart.open) }, chart.open ? "hide graph" : "graph");
@@ -1351,9 +1413,9 @@ function duelPage(id) {
   }
 
   // The finished round as a chart: each player's similarity, by guess number or time on the round's clock, raw
-  // or as a rolling average, with faint lines where the proximity column's ranks 1, 500 and 850 fall. Hints are
+  // as a rolling average, or as the best so far (the default, so it only rises), with faint lines where the proximity column's ranks 1, 500 and 850 fall. Hints are
   // left out, being nobody's guess. Only once it's over, so it can't show a race still running.
-  let chart = { open: false, x: "t", avg: false, hide: new Set(), picking: false }, chartW = 0;  // hide: unticked in the legend's picker
+  let chart = { open: false, x: "t", y: "best", hide: new Set(), picking: false }, chartW = 0;  // hide: unticked in the legend's picker
   addEventListener("resize", () => { if (view && chart.open && $("#graph").clientWidth !== chartW) graph(view); });
   // a tap anywhere but the picker or the legend closes the picker (the path, since a tap in it may redraw it)
   addEventListener("click", (e) => {
@@ -1374,14 +1436,17 @@ function duelPage(id) {
         const recent = gs.slice(Math.max(0, k - 4), k + 1);  // up to the last five of their own
         return recent.reduce((sum, h) => sum + h.score, 0) / recent.length;
       });
-      const points = gs.map((g, k) => [byTime ? g.time : g.n, chart.avg ? avgs[k] : g.score]);
+      let top = -Infinity;
+      const bests = gs.map((g) => (top = Math.max(top, g.score)));  // the best of their own so far
+      const ys = { best: bests, raw: gs.map((g) => g.score), avg: avgs }[chart.y];
+      const points = gs.map((g, k) => [byTime ? g.time : g.n, ys[k]]);
       // a colour and a dash each, so no two of the eight players look alike, in colour or without it
       return { p, gs, avgs, points, color: GRAPH_COLORS[i % 4], dash: GRAPH_DASHES[(i + (i >> 2)) % 4] };
     });
     // in the proximity bar's own colour at that rank; labelled by nearness, rank 1 being the 1000th closest word
     const t = v.thresholds;
     const lines = t ? [[t.r1, 1, "1000th"], [t.r500, 500, "500th"], [t.r850, 850, "150th"]].filter(([y]) => y != null) : [];
-    // the axes fit everyone's scores, raw and averaged, and the lines, so they hold still as the options change. The
+    // the axes fit everyone's scores, raw and averaged (the best are among the raw), and the lines, so they hold still as the options change. The
     // found word's 100 would squash the rest under an empty gap, so it gets a band of its own above a break in the axis.
     const all = [...series.flatMap((s) => [...s.gs.map((g) => g.score), ...s.avgs]), ...lines.map(([y]) => y)], xs = series.flatMap((s) => s.points.map(([x]) => x));
     const found = all.some((y) => y >= 100), scores = all.filter((y) => y < 100);
@@ -1420,9 +1485,9 @@ function duelPage(id) {
     const plot = el("div", {});
     plot.innerHTML = `<svg class="plot" viewBox="0 0 ${W} ${H}" role="img" aria-label="each player's similarity over the round">${marks}</svg>`;  // numbers only: names stay in the legend
 
-    const avg = el("span", { class: "modes" }, ...[[false, "raw"], [true, "5-avg"]].map(([value, label]) => {
-      const b = el("button", { type: "button", "aria-pressed": String(chart.avg === value) }, label);
-      b.onclick = () => { chart.avg = value; graph(view); };
+    const avg = el("span", { class: "modes" }, ...[["best", "best"], ["raw", "raw"], ["avg", "5-avg"]].map(([value, label]) => {
+      const b = el("button", { type: "button", "aria-pressed": String(chart.y === value) }, label);
+      b.onclick = () => { chart.y = value; graph(view); };
       return b;
     }));
     const swatch = (s) => {
@@ -1461,14 +1526,15 @@ function duelPage(id) {
       if (pick && !!collab !== value) b.onclick = () => pick(value);
       return b;
     };
-    return el("span", { class: "modes" }, opt("compete", false), opt("collab", true));
+    return el("span", { class: "modes" }, opt("compete", false), opt("co-op", true));
   }
 
   // A co-op round is one board, drawn by side() as if it were yours: everyone's guesses in one list, each
   // knowing who made it (by). Whoever is only watching gets the same board, without the box to type in.
   function roomSide(v) {
     const guesses = v.players.flatMap((p) => p.guesses.map((g) => ({ ...g, by: p.id }))).sort((a, b) => a.n - b.n);
-    return { id: me, guesses, checks: v.players.find((p) => p.id === me)?.checks, finish: v.players[0]?.finish ?? null };
+    const checks = v.players.flatMap((p) => (p.checks ?? []).map((c, k) => ({ ...c, by: p.id, k })));  // k: its place in theirs
+    return { id: me, guesses, checks, finish: v.players[0]?.finish ?? null };
   }
 
   // Each person's latest word (hints are nobody's).
@@ -1478,13 +1544,16 @@ function duelPage(id) {
       el("span", {}, el("b", {}, p.id === me ? "you" : p.name), " ", p.guesses.findLast((g) => !g.hint)?.word ?? "–")));
   }
 
+  // A player's list: their guesses and, among them, the words they checked after finishing, unnumbered.
+  const withChecks = (p) => [...p.guesses, ...(p.checks ?? []).map((c, k) => ({ ...c, n: null, k: c.k ?? k, check: true }))];
+
   function side(p, v) {
     const mine = p.id === me;
     const best = p.guesses.reduce((m, g) => Math.max(m, g.score), -Infinity);
     const n = p.guesses.length;
     const f = p.finish;
     const place = f?.found ? standings(v).indexOf(p) + 1 : 0;
-    const div = el("div", { class: "side" + (mine ? " me" : "") + (f?.found ? " found" : "") + (place === 1 ? " first" : "") });
+    const div = el("div", { class: "side" + (mine ? " me" : "") + (f?.found ? " found" : "") + (place === 1 ? " first" : ""), "data-id": p.id });
     div.append(el("h2", {},
       el("span", { class: "name" }, v.collab ? "together" : mine ? "you" : p.name),
       el("span", { class: "stat num" },
@@ -1538,8 +1607,7 @@ function duelPage(id) {
     }
 
     const ol = el("ol", {});
-    // words checked after finishing sit among the guesses, unnumbered
-    const all = [...p.guesses, ...(p.checks ?? []).map((c, k) => ({ ...c, n: null, k, check: true }))];
+    const all = withChecks(p);
     if (mine) pending = pending.filter((w) => !all.some((g) => g.word === w));
     if (mine && note && all.some((g) => g.word === note.word)) note = null;  // it got through after all
     const waiting = mine ? pending : [];
@@ -1547,10 +1615,7 @@ function duelPage(id) {
     const told = mine && note;
     if (all.length || waiting.length || told) ol.append(heads(sort, pickSort));
     const last = all.reduce((a, g) => (!a || g.at >= a.at ? g : a), null);
-    // a crowded table keeps opponents short until the end: their best by similarity, ordered as chosen
-    const cap = !mine && v.players.length > 2 && v.status !== "over" ? 8 : Infinity;
-    const more = all.length - cap;
-    const sorted = sortGuesses([...all].sort((a, b) => b.score - a.score).slice(0, cap));
+    const sorted = sortGuesses(all);
     // One row up top, for whatever happened last: a word that didn't count, one being scored, one already
     // guessed, or the latest guess. (A note is newer than anything pending: sending a word clears it.)
     if (told) ol.append(el("li", { class: "note latest", "data-key": `${p.id}:latest` }, el("span", { class: "n" }, ""), el("span", { class: "w" }, note.word), el("span", { class: "msg" }, note.msg)));
@@ -1560,7 +1625,6 @@ function duelPage(id) {
     // gave up: the word they didn't get, where it would have sat
     if (f && !f.found && v.secret) ol.append(el("li", { class: "missed", "data-key": `${p.id}:missed` }, el("span", { class: "n" }, ""), el("span", { class: "w" }, v.secret), el("span", { class: "s num" }, "100.00"), el("span", { class: "p" }, "😞")));
     for (const g of sorted) ol.append(row(g, p, v, false));
-    if (more > 0) ol.append(el("li", { class: "more", "data-key": `${p.id}:more` }, `+${more}`));
     if (v.collab) ol.querySelector(".heads")?.children[1].after(el("span", { class: "by" }, "Who"));
     div.append(ol);
     return div;
@@ -1584,7 +1648,8 @@ function duelPage(id) {
   }
 
   // Rows move rather than jump: before a redraw, where each row was (by key); after it, each one starts
-  // there and slides to its new place, and rows that are new fade in. Only what's on screen.
+  // there and slides to its new place, and rows that are new fade in. Only what's on screen (and, in a
+  // crowd's scrolling list, inside its box).
   function rowsAt() {
     const at = new Map();
     for (const li of document.querySelectorAll("#duel li[data-key]")) {
@@ -1598,9 +1663,11 @@ function duelPage(id) {
     for (const li of document.querySelectorAll("#duel li[data-key]")) {
       if (!li.offsetParent) continue;
       const now = li.getBoundingClientRect().top, was = before.get((li.closest("#rivals") ? "r:" : "b:") + li.dataset.key);
+      const box = li.closest(".others ol")?.getBoundingClientRect();
+      const lo = box ? Math.max(-60, box.top - li.offsetHeight) : -60, hi = box ? Math.min(h, box.bottom) : h;
       if (was === undefined) {
-        if (now > -60 && now < h) li.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: "ease-out" });
-      } else if (Math.abs(was - now) >= 1 && Math.min(was, now) < h && Math.max(was, now) > -60) {
+        if (now > lo && now < hi) li.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, easing: "ease-out" });
+      } else if (Math.abs(was - now) >= 1 && Math.min(was, now) < hi && Math.max(was, now) > lo) {
         li.animate([{ transform: `translateY(${was - now}px)` }, { transform: "none" }], { duration: 170, easing: "cubic-bezier(.2,.7,.3,1)" });
       }
     }
@@ -1619,9 +1686,9 @@ function duelPage(id) {
     if (openRival && !others.some((p) => p.id === openRival)) openRival = null;
     const lead = sorted[0];
     $("#rivals .strip").replaceChildren(...sorted.map((p) => {
-      const f = p.finish, b = best(p), last = p.guesses.at(-1);
+      const f = p.finish, b = best(p), last = withChecks(p).reduce((a, g) => (!a || g.at >= a.at ? g : a), null);
       const place = f?.found ? order.indexOf(p) + 1 : 0;
-      const fresh = last && seen !== null && !seen.has(`${p.id}:${last.n}`);
+      const fresh = last && seen !== null && !seen.has(`${p.id}:${last.check ? `c${last.k}` : last.n}`);
       const first = place === 1 || (!order.some((q) => q.finish?.found) && p === lead && b);
       const chip = el("button", { type: "button", class: ["chip", openRival === p.id && "on", fresh && "fresh", first && "first", f?.found && "found"].filter(Boolean).join(" ") },
         el("span", { class: "name" }, p.name),
@@ -1636,11 +1703,12 @@ function duelPage(id) {
     const p = others.find((q) => q.id === openRival);
     const box2 = $("#rivals .open");
     if (!p) return box2.replaceChildren();
-    const f = p.finish, last = p.guesses.at(-1), ol = el("ol", {});
-    if (last && p.guesses.length > 1) ol.append(row(last, p, v, true));
+    const all = withChecks(p), f = p.finish, ol = el("ol", {});
+    const last = all.reduce((a, g) => (!a || g.at >= a.at ? g : a), null);
+    if (last && all.length > 1) ol.append(row(last, p, v, true));
     if (f && !f.found && v.secret) ol.append(el("li", { class: "missed", "data-key": `${p.id}:missed` }, el("span", { class: "n" }, ""), el("span", { class: "w" }, v.secret), el("span", { class: "s num" }, "100.00"), el("span", { class: "p" }, "😞")));
-    for (const g of sortGuesses(p.guesses)) ol.append(row(g, p, v, false));
-    if (!p.guesses.length) ol.append(el("li", { class: "more" }, "no guesses yet"));
+    for (const g of sortGuesses(all)) ol.append(row(g, p, v, false));
+    if (!all.length) ol.append(el("li", { class: "more" }, "no guesses yet"));
     box2.replaceChildren(ol);
   }
 
@@ -1650,11 +1718,11 @@ function duelPage(id) {
     const fresh = (isLatest || p.guesses.length === 1) && seen !== null && !seen.has(`${owner}:${key}`);
     // yours lands quietly (the score fades in); someone else's gets a highlight
     const lands = fresh && owner === me;
-    const li = el("li", { "data-key": `${p.id}:${isLatest ? "latest" : key}`, class: [isLatest && "latest", lands && "landed", fresh && !lands && "fresh", isAgain && "again", g.shared && "shared", g.check && "check", v.secret && g.word === v.secret && "secret"].filter(Boolean).join(" ") });
+    const li = el("li", { "data-key": isLatest ? `${p.id}:latest` : `${owner}:${key}`, class: [isLatest && "latest", lands && "landed", fresh && !lands && "fresh", isAgain && "again", g.shared && "shared", g.check && "check", v.secret && g.word === v.secret && "secret"].filter(Boolean).join(" ") });
     li.append(
       el("span", { class: "n num", title: g.shared ? "guessed by someone else too" : "" }, g.check ? "·" : g.n),
       wordOf(g, p, g.hint && !v.collab ? tag("hint") : g.check ? tag("after") : ""),
-      ...(v.collab ? [el("span", { class: g.hint ? "by hint" : "by" }, g.hint ? "hint" : g.check ? "" : owner === me ? "you" : v.players.find((q) => q.id === owner)?.name ?? "")] : []),
+      ...(v.collab ? [el("span", { class: g.hint ? "by hint" : "by" }, g.hint ? "hint" : owner === me ? "you" : v.players.find((q) => q.id === owner)?.name ?? "")] : []),
       el("span", { class: "s num", style: `color:${heat(g)}` }, g.score.toFixed(2)),
       proximity(g),
     );
