@@ -1124,7 +1124,7 @@ function duelPage(id) {
     e.preventDefault();
     const name = $("#name").value.trim();
     if (!name) { const was = store.get("sd-name"); if (!was) return; $("#name").value = was; }
-    else { store.set("sd-name", name); if (inNow() || !blurred || !stood) join(name).then((r) => r.view && apply(r.view)); }
+    else { store.set("sd-name", name); if (inNow() ? name !== view.players.find((p) => p.id === me).name : !blurred || !stood) join(name).then((r) => r.view && apply(r.view)); }
     editing = false; showMine();
     if (view) render();
   };
@@ -1133,8 +1133,11 @@ function duelPage(id) {
     const name = $("#name").value.trim() || store.get("sd-name");
     if (!name) { editing = true; showMine(); return $("#name").focus(); }
     store.set("sd-name", name);
+    editing = false; showMine();
     join(name).then((r) => r.view && apply(r.view));
   };
+  // Tapping these mustn't blur the name box: its submit swaps the box out and the button moves from under the finger.
+  $("#mine .joinbtn").onpointerdown = $("#mine .standbtn").onpointerdown = (e) => e.preventDefault();
   // Standing up is leaving the lobby to watch. Out of voice too: it's for the players, and its bar goes with your seat.
   $("#mine .standbtn").onclick = () => {
     stood = true;
