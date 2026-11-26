@@ -1088,7 +1088,7 @@ function duelPage(id) {
    // seen: guesses already drawn, so only new ones flash
   let sort = { by: "score", dir: -1 };  // the lists' order: a column of SORTS, and which way (-1: high to low). Best first to start
   let recall = null, flashRecall = false;  // a word I'd already guessed: shown up top again, like Semantle does
-  let note = null;  // {word, msg}: why my last word didn't count
+  let notes = [];  // [{word, msg}]: why my recent words didn't count
   let picking = false, today = null;  // rematch: choosing a puzzle
   let nextCollab = null;  // rematch: compete or collab, if changed from this round's
   let openRival = null;  // on a phone, whose list is open under the strip
@@ -1236,7 +1236,7 @@ function duelPage(id) {
     history.replaceState(null, "", `/d/${view.room}`);
     id = next; base = `/d/${id}`;
     view = currentView = null; drawn = null; greeted = false; stood = false;
-    seen = null; input.value = ""; pending = []; recall = null; flashRecall = false; note = null;
+    seen = null; input.value = ""; pending = []; recall = null; flashRecall = false; notes = [];
     picking = false; nextCollab = null; openRival = null;
     editing = !store.get("sd-name"); showMine();
     chart = { open: false, x: "t", y: "best", hide: new Set(), picking: false };
@@ -1411,7 +1411,7 @@ function duelPage(id) {
   function vote(v, asks, { action, label, asking, wants, voters = v.players.filter((p) => !p.finish) }) {
     const ask = (want, text) => {
       const b = el("button", { type: "button" }, text);
-      b.onclick = () => post(`${base}/${action}`, { player: me, want }).then((r) => { if (r.view) apply(r.view); if (!r.ok && r.error) { note = { word: label, msg: r.error }; render(); } });
+      b.onclick = () => post(`${base}/${action}`, { player: me, want }).then((r) => { if (r.view) apply(r.view); if (!r.ok && r.error) { notes = [{ word: label, msg: r.error }]; render(); } });
       return b;
     };
     const others = voters.filter((p) => p.id !== me);
@@ -1703,7 +1703,7 @@ function duelPage(id) {
     const word = input.value.trim().toLowerCase();
     if (!word) return;
     input.value = "";
-    note = null; recall = null;
+    notes = []; recall = null;
     const mineNow = view.players.find((q) => q.id === me);
     const known = [...(view.collab ? view.players.flatMap((q) => q.guesses) : mineNow?.guesses ?? []), ...(mineNow?.checks ?? [])];
     if (known.some((g) => g.word === word)) { recall = word; flashRecall = true; return render(); }
@@ -1716,7 +1716,7 @@ function duelPage(id) {
     if (r.view) apply(r.view);  // draws it (once), unless the event stream already did
     if (!r.ok) {
       if (r.error === "already guessed") { recall = word; flashRecall = true; }
-      else note = { word, msg: r.error === "upstream trouble" ? "server hiccup, try again" : r.error ?? "try again" };
+      else notes = [...notes.filter((n) => n.word !== word), { word, msg: r.error === "upstream trouble" ? "server hiccup, try again" : r.error ?? "try again" }].slice(-3);
       render();
     } else if (!r.view) render();
   };
@@ -1752,19 +1752,25 @@ function duelPage(id) {
     const ol = el("ol", {});
     const all = withChecks(p);
     if (mine) pending = pending.filter((w) => !all.some((g) => g.word === w));
-    if (mine && note && all.some((g) => g.word === note.word)) note = null;  // it got through after all
+    if (mine) notes = notes.filter((n) => !all.some((g) => g.word === n.word));  // it got through after all
     const waiting = mine ? pending : [];
     const again = mine && recall ? all.find((g) => g.word === recall) : null;
-    const told = mine && note;
-    if (all.length || waiting.length || told) ol.append(heads(sort, pickSort));
+    const told = mine ? notes : [];
+    if (all.length || waiting.length || told.length) ol.append(heads(sort, pickSort));
     const last = all.reduce((a, g) => (!a || g.at >= a.at ? g : a), null);
     const sorted = sortGuesses(all);
-    // One row up top, for whatever happened last: a word that didn't count, one being scored, one already
-    // guessed, or the latest guess. (A note is newer than anything pending: sending a word clears it.)
-    if (told) ol.append(el("li", { class: "note latest", "data-key": `${p.id}:latest` }, el("span", { class: "n" }, ""), el("span", { class: "w" }, note.word), el("span", { class: "msg" }, note.msg)));
-    else if (waiting.length) ol.append(el("li", { class: "pending latest", "data-key": `${p.id}:latest` }, el("span", { class: "n num" }, ""), el("span", { class: "w" }, waiting.at(-1)), el("span", { class: "s num" }, "…"), el("span", {})));
-    else if (again) ol.append(row(again, p, v, true, flashRecall));
-    else if (last && all.length > 1) ol.append(row(last, p, v, true));
+    // Rows up top, for whatever happened last: words that didn't count, then every word being scored; failing
+    // that, one already guessed, or the latest guess. (The last of them is the latest.)
+    const top = [
+      ...told.map((n) => ["note", `note:${n.word}`, [el("span", { class: "n" }, ""), el("span", { class: "w" }, n.word), el("span", { class: "msg" }, n.msg)]]),
+      ...waiting.map((w) => ["pending", `pending:${w}`, [el("span", { class: "n num" }, ""), el("span", { class: "w" }, w), el("span", { class: "s num" }, "…"), el("span", {})]]),
+    ];
+    top.forEach(([cls, key, kids], i) => {
+      const latest = i === top.length - 1;
+      ol.append(el("li", { class: cls + (latest ? " latest" : ""), "data-key": `${p.id}:${latest ? "latest" : key}` }, ...kids));
+    });
+    if (!top.length && again) ol.append(row(again, p, v, true, flashRecall));
+    else if (!top.length && last && all.length > 1) ol.append(row(last, p, v, true));
     // gave up: the word they didn't get, where it would have sat
     if (f && !f.found && v.secret) ol.append(el("li", { class: "missed", "data-key": `${p.id}:missed` }, el("span", { class: "n" }, ""), el("span", { class: "w" }, v.secret), el("span", { class: "s num" }, "100.00"), el("span", { class: "p" }, "😞")));
     for (const g of sorted) ol.append(row(g, p, v, false));
