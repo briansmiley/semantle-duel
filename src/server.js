@@ -172,6 +172,10 @@ async function createDuel(which, room = null, { mode, word, setter, avoid, colla
   return id;
 }
 
+// Google's word2vec, which Semantle scores with, left out just these four common words: no score exists for them.
+const UNSCORED = new Set(["a", "and", "of", "to"]);
+const unknown = (word) => (UNSCORED.has(word) ? "not included" : "unknown word");
+
 async function handle(req, res) {
   const url = new URL(req.url, "http://x");
   const parts = url.pathname.split("/").filter(Boolean);
@@ -321,7 +325,7 @@ async function handle(req, res) {
     if (why) return json(res, 409, { error: why });
     if (!room.scores.has(word)) room.scores.set(word, await score(word, duel.puzzle.secret));
     const result = room.scores.get(word);
-    if (!result) return json(res, 409, { error: "unknown word" });
+    if (!result) return json(res, 409, { error: unknown(word) });
     duel.check(player, word, result, Date.now());
   } else if (action === "guess") {
     const word = String(msg.word ?? "").trim().toLowerCase();
@@ -329,7 +333,7 @@ async function handle(req, res) {
     if (why) return json(res, 409, { error: why });
     if (!room.scores.has(word)) room.scores.set(word, await score(word, duel.puzzle.secret));
     const result = room.scores.get(word);
-    if (!result) return json(res, 409, { error: "unknown word" });
+    if (!result) return json(res, 409, { error: unknown(word) });
     duel.guess(player, word, result, Date.now());
   } else {
     return json(res, 404, { error: "not found" });
