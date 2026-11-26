@@ -102,6 +102,12 @@
   #voice .who .talking { color: var(--hot); }
   #voice .who .muted, #voice .who .off { color: var(--faint); }
   #voice .err { color: var(--hot); font-style: italic; }
+  #mic { margin-top: .3rem; color: var(--faint); font-size: .95rem; display: flex; flex-wrap: wrap; gap: .2rem 1rem; align-items: center; }
+  #mic label { display: inline-flex; align-items: center; gap: .4em; }
+  #mic input { width: 7rem; margin: 0; accent-color: var(--faint); }
+  #mic .gate { position: relative; display: inline-flex; }
+  #mic .gate i { position: absolute; left: 0; bottom: -3px; height: 2px; width: 0; background: var(--rule); }
+  #mic .gate i.open { background: var(--hot); }
   #watch { margin-top: 1rem; display: flex; flex-wrap: wrap; align-items: baseline; gap: .4rem 1rem; font-size: 1.1rem; }
   #watch span { color: var(--faint); font-style: italic; }
   #watch input { width: 9em; }
@@ -116,9 +122,10 @@
   #lobby .who .others { display: contents; }
   #mine { display: inline-flex; align-items: baseline; gap: .3em; }
   #mine input { font-size: inherit; width: 8em; }
-  #mine .leavebtn { margin-left: .5em; color: var(--faint); font-size: .8em; align-self: center; }
-  #mine .leavebtn:hover { color: var(--ink); }
   #mine .joinbtn { margin-left: .5em; border-bottom: 2px solid var(--hot); padding-bottom: 1px; }
+  #mine .spectating { margin-left: .5em; color: var(--faint); font-style: italic; font-size: .8em; }
+  #mine .standbtn { margin-left: .5em; color: var(--faint); font-size: .7em; align-self: center; }
+  #mine .standbtn:hover { color: var(--ink); }
   #mine .pencil { color: var(--faint); align-self: center; display: grid; }
   #mine .pencil:hover { color: var(--ink); }
   #mine .pencil svg { width: .8em; height: .8em; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
@@ -202,6 +209,10 @@
   #tally { margin: .3rem 0 .6rem; color: var(--faint); font-size: .95rem; display: grid; gap: .15rem; }
   #tally b { font-weight: 400; color: var(--ink); }
   #tally .lead b { color: var(--hot); }
+  #tally .more { border-bottom: 1px dotted currentColor; }
+  #tally .rounds { list-style: none; margin: .1rem 0 0; padding: 0; display: grid; gap: .1rem; }
+  #tally .rounds li { display: block; padding: 0; border: 0; }
+  #tally .rounds a { color: var(--ink); }
   #graph { margin: .3rem 0 .8rem; max-width: 40rem; color: var(--faint); font-size: .95rem; }
   #graph .opts { display: flex; flex-wrap: wrap; align-items: baseline; gap: .2rem 1.4rem; }
   #graph .key { display: inline-block; width: 22px; margin-right: .3em; }
@@ -377,13 +388,17 @@
   </header>
   <div id="voice" hidden></div>
   <p id="away" role="status" hidden>server updating…</p>
-  <form id="watch" hidden><span>you’re watching.</span><input class="line" id="latename" placeholder="your name" maxlength="24" autocomplete="off"><button class="go">join in</button></form>
+  <div id="mic" hidden>
+    <label title="how loud your mic goes out">sensitivity <input type="range" id="micgain" min="-12" max="12" step="1"></label>
+    <label title="below this level nothing goes out: room noise and breathing stay here">floor <span class="gate"><input type="range" id="micfloor" min="-70" max="-20" step="1"><i></i></span></label>
+  </div>
+  <form id="watch" hidden><span>you’re watching.</span><input class="line" id="latename" placeholder="your name" maxlength="24" autocomplete="off"><button class="go">sit in</button></form>
   <div id="banner" hidden></div>
   <nav id="after" hidden></nav>
   <div id="tally" hidden></div>
   <div id="graph" hidden></div>
   <section id="lobby" hidden>
-    <div class="who"><span id="mine"><form id="nameform"><input class="line" id="name" placeholder="your name" maxlength="24" autocomplete="off"></form><span class="me"></span><button type="button" class="pencil" title="change your name" aria-label="change your name"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4"/></svg></button><button type="button" class="joinbtn">join</button><button type="button" class="leavebtn">leave</button></span><span class="others"></span></div>
+    <div class="who"><span id="mine"><form id="nameform"><input class="line" id="name" placeholder="your name" maxlength="24" autocomplete="off"></form><span class="me"></span><button type="button" class="pencil" title="change your name" aria-label="change your name"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4"/></svg></button><button type="button" class="standbtn">stand up</button><span class="spectating">spectating</span><button type="button" class="joinbtn">sit</button></span><span class="others"></span></div>
     <div class="mode"></div>
     <div><button id="go" disabled>ready</button><span class="wait"></span></div>
   </section>
@@ -413,6 +428,7 @@ const store = {
 try { localStorage.removeItem("sd-duels"); localStorage.removeItem("sd-made"); } catch {}
 const me = store.get("sd-player") || (() => { const id = crypto.randomUUID?.() ?? [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join(""); store.set("sd-player", id); return id; })();
 const path = location.pathname.split("/").filter(Boolean);
+const pinned = new URLSearchParams(location.search).has("round");  // a duel page opened with ?round: just that round
 
 // Never throws: a dropped or stalled request comes back as { ok: false } after 15s at most.
 async function post(url, data) {
@@ -461,7 +477,8 @@ function myRooms() {
     r.at = Math.max(r.at, d.at);
     if (d.status !== "lobby") r.rounds.push(d);  // a round that never started isn't history
   }
-  for (const r of by.values()) r.rounds.sort((a, b) => b.at - a.at);
+  // by when each began, not when this browser last saw it: looking back at an earlier round doesn't make it the latest
+  for (const r of by.values()) r.rounds.sort((a, b) => (b.start ?? b.at) - (a.start ?? a.at));
   return [...by.values()].sort((a, b) => b.at - a.at);
 }
 
@@ -477,7 +494,7 @@ async function roomsNow() {
     const m = merged.get(key);
     if (!m) return merged.set(key, { ...r, room: h?.room ?? r.room, others: new Set(r.others), h });
     r.others.forEach((n) => m.others.add(n));
-    m.rounds = [...m.rounds, ...r.rounds].sort((a, b) => b.at - a.at);
+    m.rounds = [...m.rounds, ...r.rounds].sort((a, b) => (b.start ?? b.at) - (a.start ?? a.at));
     m.at = Math.max(m.at, r.at);
   });
   return [...merged.values()].sort((a, b) => b.at - a.at);
@@ -534,7 +551,7 @@ function openList(rooms) {
   ))));
 }
 
-const VOICE_INTO = "sd-voice-into";  // sessionStorage: "<duel id>|<when>": this tab was in voice, heading into (or reloading) that duel
+const VOICE_INTO = "sd-voice-into";  // sessionStorage: "<duel id>|<when>": this tab was in voice in that duel when its page went (a reload)
 
 // Propose a rematch of a finished duel on this puzzle; whoever asks first sets it, and it's made once every player
 // has said yes. Nobody is moved off the finished round: returns its view, with the proposal in it (someone else's,
@@ -546,13 +563,9 @@ async function rematch(id, puzzle, button, mode, collab) {
   return r.view;
 }
 
-// Rooms this browser made: opening one joins you, as does opening a room you've played in (but no other).
-const made = () => { try { return JSON.parse(store.get("sd-rooms-made")) || []; } catch { return []; } };
-
 async function newDuel(puzzle, button, extra = {}) {
   button.disabled = true;
   const r = await post("/duels", { puzzle, ...extra });
-  if (r.id) store.set("sd-rooms-made", JSON.stringify([r.id, ...made()].slice(0, 50)));
   if (r.id) location.href = `/d/${r.id}`; else button.disabled = false;
   return r;
 }
@@ -707,9 +720,12 @@ let currentView = null;  // the duel on screen, if any
     d.classList.toggle("tight", vv.height < fullHeight + 8);
   };
   const follow = () => { if (!vv) return; vv.addEventListener("resize", fit); vv.addEventListener("scroll", fit); fit(); };
-  d.addEventListener("close", () => { vv?.removeEventListener("resize", fit); vv?.removeEventListener("scroll", fit); place(null); d.classList.remove("tight"); });
-  // cancel throws the draft away; a tap outside only puts it aside
-  $("#report .cancel").onclick = () => { ta.value = ""; setImage(null); d.close(); };
+  // however it closes (cancel, Escape, a tap outside), the draft goes with it; one still sending is kept for its retry
+  d.addEventListener("close", () => {
+    vv?.removeEventListener("resize", fit); vv?.removeEventListener("scroll", fit); place(null); d.classList.remove("tight");
+    if (!sending) { ta.value = ""; setImage(null); }
+  });
+  $("#report .cancel").onclick = () => d.close();
 
   // A screenshot, picked, dropped or pasted: shrunk to a JPEG no bigger than 1600px on its longer side.
   let image = null;
@@ -733,7 +749,10 @@ let currentView = null;  // the duel on screen, if any
   d.addEventListener("paste", (e) => { const f = imageIn(e.clipboardData.files); if (f) { e.preventDefault(); attach(f); } });
   d.addEventListener("dragover", (e) => e.preventDefault());
   d.addEventListener("drop", (e) => { e.preventDefault(); attach(imageIn(e.dataTransfer.files)); });
-  d.onclick = (e) => { if (e.target === d) d.close(); };  // tap outside (braces: an onclick returning false would cancel the send)
+  // tap outside, but not a drag (selecting text) that only ends there (braces: an onclick returning false would cancel the send)
+  let pressedOutside = false;
+  d.addEventListener("pointerdown", (e) => (pressedOutside = e.target === d));
+  d.onclick = (e) => { if (e.target === d && pressedOutside) d.close(); };
   $("#report form").onsubmit = async (e) => {
     e.preventDefault();
     if (!ta.value.trim()) return ta.focus();
@@ -766,22 +785,31 @@ let currentView = null;  // the duel on screen, if any
 // ICE candidates go up as POST /signal and come down the event stream (`event: signal`), the sender
 // stamped by the server. Of two players the one with the smaller id makes the offer, so offers never cross.
 // STUN only: two players both behind strict NATs won't hear each other (that would need a TURN relay).
+// What we send goes through this device's mic settings first: a sensitivity (a gain, in dB) and a floor
+// (a noise gate: below that level, in dBFS, nothing goes out), both remembered here. Without Web Audio
+// (or until its context may run) the raw mic goes out instead.
+const MIC_FLOOR_OFF = -70;  // the floor slider's bottom: no gate
 const ICE_SERVERS = [{ urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302", "stun:stun.cloudflare.com:3478"] }];
 
-function voiceChat(base, changed) {
-  const st = { status: "off", muted: false, error: null, speaking: new Set(), links: new Map() };
+function voiceChat(base, changed) {  // base(): the round's API path, which changes when the page moves on to a rematch
+  const num = (k, d) => { const n = Number(store.get(k) ?? d); return Number.isFinite(n) ? n : d; };
+  const st = { status: "off", muted: false, error: null, speaking: new Set(), links: new Map(),
+    gain: num("sd-mic-gain", 0), floor: num("sd-mic-floor", MIC_FLOOR_OFF), tunable: false };
   const peers = new Map();  // id -> { pc, audio, queued }
   const meters = new Map(); // id -> { node, source }
   let mic = null, ctx = null, timer = null, asks = 0;
-  const signal = (to, data) => post(`${base}/signal`, { player: me, to, data: JSON.stringify(data) });
-  const tell = () => post(`${base}/voice`, { player: me, on: st.status === "on", muted: st.muted });
+  let out = null, boost = null, gate = null, gating = null;  // what we send, and the gain and gate on its way
+  const api = { state: st, join, leave, setMuted, setGain, setFloor, sync, onSignal, level: null };
+  const tracks = () => [...mic?.getAudioTracks() ?? [], ...out?.getAudioTracks() ?? []];
+  const signal = (to, data) => post(`${base()}/signal`, { player: me, to, data: JSON.stringify(data) });
+  const tell = () => post(`${base()}/voice`, { player: me, on: st.status === "on", muted: st.muted });
 
   async function join() {
     if (st.status !== "off") return;
     st.status = "asking"; st.error = null; changed();
     const ask = ++asks;
     let made = null;
-    try { made = new AudioContext(); } catch {}  // made inside the click, so audio may play; only for who's speaking
+    try { made = new AudioContext(); } catch {}  // made inside the click, so it may run: the mic's settings and who's speaking go through it
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
@@ -791,9 +819,9 @@ function voiceChat(base, changed) {
       return;
     }
     if (ask !== asks || st.status !== "asking") { for (const t of stream.getTracks()) t.stop(); made?.close(); return; }
-    mic = stream; ctx = made; ctx?.resume();
-    for (const t of mic.getAudioTracks()) t.enabled = !st.muted;
-    meter(me, mic);
+    mic = stream; ctx = made;
+    if (ctx) tune();
+    for (const t of tracks()) t.enabled = !st.muted;
     timer = setInterval(measure, 120);
     st.status = "on"; changed();
     const r = await tell();
@@ -804,9 +832,9 @@ function voiceChat(base, changed) {
     if (st.status === "off") return;
     asks++;
     for (const id of [...peers.keys()]) close(id);
-    for (const t of mic?.getTracks() ?? []) t.stop();
-    mic = null;
-    clearInterval(timer);
+    for (const t of tracks()) t.stop();
+    mic = out = boost = gate = null; st.tunable = false;
+    clearInterval(timer); clearInterval(gating);
     for (const m of meters.values()) m.source.disconnect();
     meters.clear();
     ctx?.close(); ctx = null;
@@ -817,7 +845,7 @@ function voiceChat(base, changed) {
 
   function setMuted(muted) {
     st.muted = muted;
-    for (const t of mic?.getAudioTracks() ?? []) t.enabled = !muted;
+    for (const t of tracks()) t.enabled = !muted;
     changed();
     if (st.status === "on") tell();
   }
@@ -851,7 +879,8 @@ function voiceChat(base, changed) {
     audio.autoplay = true;
     const peer = { pc, audio, queued: [] };
     peers.set(id, peer);
-    for (const t of mic?.getAudioTracks() ?? []) pc.addTrack(t, mic);
+    const s = sent();
+    for (const t of s?.getAudioTracks() ?? []) pc.addTrack(t, s);
     pc.onicecandidate = (e) => e.candidate && signal(id, { ice: e.candidate.toJSON() });
     pc.ontrack = (e) => {
       const stream = e.streams[0] ?? new MediaStream([e.track]);
@@ -928,8 +957,55 @@ function voiceChat(base, changed) {
     if ([...now].sort().join() !== [...st.speaking].sort().join()) { st.speaking = now; changed(); }
   }
 
+  // mic -> sensitivity -> gate -> what we send. The gate opens as soon as the level (after the sensitivity)
+  // is over the floor and closes once it has been under it for a moment, so words aren't clipped.
+  function tune() {
+    const source = ctx.createMediaStreamSource(mic), level = ctx.createAnalyser(), dest = ctx.createMediaStreamDestination();
+    boost = ctx.createGain(); gate = ctx.createGain();
+    boost.gain.value = 10 ** (st.gain / 20);
+    source.connect(boost).connect(gate).connect(dest);
+    level.fftSize = 1024;
+    boost.connect(level);
+    out = dest.stream;
+    const heard = ctx.createAnalyser();  // our own "talking" light shows what the others get
+    heard.fftSize = 512;
+    gate.connect(heard);
+    meters.set(me, { node: heard, source: gate });
+    st.tunable = true;
+    const samples = new Float32Array(level.fftSize);
+    let open = true, until = 0;
+    gating = setInterval(() => {
+      level.getFloatTimeDomainData(samples);
+      let sum = 0;
+      for (const x of samples) sum += x * x;
+      const db = 10 * Math.log10(sum / samples.length || 1e-12), now = performance.now();
+      if (st.floor <= MIC_FLOOR_OFF || db > st.floor) until = now + 400;
+      if (open !== now < until) {
+        open = !open;
+        gate.gain.setTargetAtTime(open ? 1 : 0, ctx.currentTime, open ? 0.005 : 0.05);
+      }
+      api.level?.(db, open);
+    }, 20);
+    // A context made without a click (rejoining after a reload) may not run until the next tap: until it
+    // does, the raw mic goes out, then what it makes.
+    ctx.onstatechange = () => {
+      const t = out?.getAudioTracks()[0];
+      if (ctx?.state !== "running" || !t) return;
+      for (const { pc } of peers.values()) for (const s of pc.getSenders()) if (s.track && s.track !== t) s.replaceTrack(t).catch(() => {});
+    };
+    ctx.resume().catch(() => {});
+    if (ctx.state !== "running") document.addEventListener("pointerdown", () => ctx?.resume().catch(() => {}), { once: true });
+  }
+  const sent = () => (out && ctx?.state === "running" ? out : mic);
+
+  function setGain(db) {
+    st.gain = db; store.set("sd-mic-gain", db);
+    boost?.gain.setTargetAtTime(10 ** (db / 20), ctx.currentTime, 0.02);
+  }
+  function setFloor(db) { st.floor = db; store.set("sd-mic-floor", db); }
+
   addEventListener("pagehide", () => leave());
-  return { state: st, join, leave, setMuted, sync, onSignal };
+  return api;
 }
 
 /* ---------- pages ---------- */
@@ -987,18 +1063,19 @@ async function archivePage() {
     const b = el("button", { class: played.has(n) ? "played" : "", title: played.has(n) ? "played" : "" },
       el("b", { class: "num" }, `#${n}`),
       el("small", {}, d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })));
-    // a rematch proposed: back to the finished round to wait for the others (just that one, should it already be made)
-    b.onclick = () => (rematchOf ? rematch(rematchOf, n, b, undefined, collabNext === null ? undefined : collabNext === "1").then((v) => v && (location.href = `/d/${rematchOf}?round`)) : newDuel(n, b));
+    // a rematch proposed: back to the finished round to wait for the others (or on into the rematch, should it already be made)
+    b.onclick = () => (rematchOf ? rematch(rematchOf, n, b, undefined, collabNext === null ? undefined : collabNext === "1").then((v) => v && (location.href = `/d/${rematchOf}`)) : newDuel(n, b));
     months.get(key).push(b);
   }
   $("#archive .months").replaceChildren(...[...months].flatMap(([m, bs]) => [el("h3", {}, m), el("div", { class: "grid" }, ...bs)]));
 }
 
 /* ---------- duel ---------- */
-// /d/<room> opens the room's latest round (unless you're still racing an earlier one); ?round opens just that one.
+// /d/<room> opens the room's latest round (unless you're still racing an earlier one); ?round opens just that one,
+// and stays on it once its rematch is made, with a link on to it. (pinned is set up top: the pages open before here)
 async function openDuel(code) {
   let id = code;
-  if (!new URLSearchParams(location.search).has("round")) {
+  if (!pinned) {
     try { id = (await (await fetch(`/d/${code}/head?player=${encodeURIComponent(me)}`)).json()).id ?? code; } catch {}
   }
   duelPage(id);
@@ -1006,7 +1083,7 @@ async function openDuel(code) {
 
 function duelPage(id) {
   $("#duel").hidden = false;
-  const base = `/d/${id}`;
+  let base = `/d/${id}`;  // (both change when the page moves on to a rematch: see into)
   let view = null, skew = 0, seen = null, draft = "", pending = [];  // pending: my guesses sent but not yet scored
    // seen: guesses already drawn, so only new ones flash
   let sort = { by: "score", dir: -1 };  // the lists' order: a column of SORTS, and which way (-1: high to low). Best first to start
@@ -1019,8 +1096,9 @@ function duelPage(id) {
 
   const join = (name) => post(`${base}/join`, { player: me, name });
   const savedName = store.get("sd-name");
-  // Joined on the first view: in the lobby, or to refresh your name if you're already in. Mid-game you start out watching.
+  // Sat down on the first view: in the lobby, or to refresh your name if you're already in. Mid-game you start out watching.
   let greeted = false;
+  let stood = false;  // stood up to watch: from then on only "sit" (or Enter in the name box) sits you
   if (savedName) { $("#name").value = savedName; $("#latename").value = savedName; }
   $("#watch").onsubmit = async (e) => {
     e.preventDefault();
@@ -1041,12 +1119,12 @@ function duelPage(id) {
   $("#mine .pencil").onclick = () => { editing = true; showMine(); $("#name").focus(); $("#name").select(); };
 
   const inNow = () => !!view?.players.some((p) => p.id === me);
-  let blurred = false;  // a submit from leaving the box only keeps the name; Enter (or "join") also joins
+  let blurred = false;  // having stood up, a submit from leaving the box only keeps the name; Enter (or "sit") also sits
   $("#nameform").onsubmit = (e) => {
     e.preventDefault();
     const name = $("#name").value.trim();
     if (!name) { const was = store.get("sd-name"); if (!was) return; $("#name").value = was; }
-    else { store.set("sd-name", name); if (inNow() || !blurred) join(name).then((r) => r.view && apply(r.view)); }
+    else { store.set("sd-name", name); if (inNow() || !blurred || !stood) join(name).then((r) => r.view && apply(r.view)); }
     editing = false; showMine();
     if (view) render();
   };
@@ -1057,10 +1135,15 @@ function duelPage(id) {
     store.set("sd-name", name);
     join(name).then((r) => r.view && apply(r.view));
   };
-  $("#mine .leavebtn").onclick = () => {
-    clearTimeout(naming);  // a name still on its way up would put you back in
-    voice.leave();  // voice is for the players: out of it too, or your mic stays open with its bar hidden
-    post(`${base}/leave`, { player: me }).then((r) => r.view && apply(r.view));
+  // Standing up is leaving the lobby to watch. Out of voice too: it's for the players, and its bar goes with your seat.
+  $("#mine .standbtn").onclick = () => {
+    stood = true;
+    clearTimeout(naming);  // a rename still on its way would sit you back down
+    post(`${base}/leave`, { player: me }).then((r) => {
+      if (!r.view) return;
+      if (!r.view.players.some((p) => p.id === me)) voice.leave();  // (not if the round began first: then you're still in it)
+      apply(r.view);
+    });
   };
   // Your name in the list follows the box as you type; everyone else sees it once you pause.
   let naming = null;
@@ -1096,15 +1179,26 @@ function duelPage(id) {
     es.addEventListener("ping", () => (heard = Date.now()));
     es.addEventListener("signal", (e) => { heard = Date.now(); const m = JSON.parse(e.data); voice.onSignal(m.from, m.data); });
   };
-  // In voice when the page goes (a reload, or into a rematch): the next page here joins voice by itself,
-  // if it comes within 30s. Registered before the voice chat's own pagehide, which leaves voice.
-  const carry = (into) => { try { if (voice.state.status === "on") sessionStorage.setItem(VOICE_INTO, `${into}|${Date.now()}`); } catch {} };
+  // In voice when the page goes (a reload, or from a ?round page on to its rematch): the next page here joins voice
+  // by itself, if it comes within 30s. Registered before the voice chat's own pagehide, which leaves voice.
+  const carry = (to) => { try { if (voice.state.status === "on") sessionStorage.setItem(VOICE_INTO, `${to}|${Date.now()}`); } catch {} };
   addEventListener("pagehide", () => { try { if (!sessionStorage.getItem(VOICE_INTO)) carry(id); } catch {} });
-  const voice = voiceChat(base, () => view && voiceBar(view));
+  const voice = voiceChat(() => base, () => view && voiceBar(view));
+  // the mic settings sit outside the voice bar, which is redrawn while people talk: dragging survives that
+  let micOpen = false;
+  const micGain = $("#micgain"), micFloor = $("#micfloor"), micLevel = $("#mic .gate i");
+  micGain.value = voice.state.gain; micFloor.value = voice.state.floor;
+  micGain.oninput = () => voice.setGain(Number(micGain.value));
+  micFloor.oninput = () => voice.setFloor(Number(micFloor.value));
+  voice.level = (db, open) => {  // how loud you are now, on the floor slider's scale; lit while it goes out
+    if ($("#mic").hidden) return;
+    micLevel.style.width = `${Math.max(0, Math.min(1, (db - MIC_FLOOR_OFF) / (Number(micFloor.max) - MIC_FLOOR_OFF))) * 100}%`;
+    micLevel.classList.toggle("open", open && db > MIC_FLOOR_OFF);
+  };
   let rejoinVoice = false;  // join once we're a player here
   try {
-    const [into, at] = (sessionStorage.getItem(VOICE_INTO) ?? "").split("|");
-    rejoinVoice = into === id && Date.now() - Number(at) < 30_000;
+    const [to, at] = (sessionStorage.getItem(VOICE_INTO) ?? "").split("|");
+    rejoinVoice = to === id && Date.now() - Number(at) < 30_000;
     sessionStorage.removeItem(VOICE_INTO);
   } catch {}
   connect();
@@ -1120,9 +1214,10 @@ function duelPage(id) {
   document.addEventListener("visibilitychange", here);
 
   function apply(v) {
-    if (view && v.now < view.now) return;  // an older snapshot arriving late
+    if (v.id !== id || (view && v.now < view.now)) return;  // a round this page has moved on from, or an older snapshot arriving late
     view = currentView = v;
     skew = view.now - Date.now();
+    if (v.next && !racing() && !pinned) return into(v.next);  // the rematch is made: on into it (a ?round page links to it)
     voice.sync(v.voice);
     if (rejoinVoice && v.players.some((p) => p.id === me)) { rejoinVoice = false; voice.join(); }
     // The same news often comes twice (the reply to a guess, then the event stream): redraw once, so a
@@ -1134,6 +1229,22 @@ function duelPage(id) {
     render();
   }
   let drawn = null;  // what was last drawn, less the clock
+
+  // Into the rematch's lobby, on this page: the finished round's state goes, as on a page opened afresh, and the
+  // stream moves to the new round. Voice stays on: its first view there finds us missing and says we're in again.
+  function into(next) {
+    history.replaceState(null, "", `/d/${view.room}`);
+    id = next; base = `/d/${id}`;
+    view = currentView = null; drawn = null; greeted = false; stood = false;
+    seen = null; draft = ""; pending = []; recall = null; flashRecall = false; note = null;
+    picking = false; nextCollab = null; openRival = null;
+    editing = !store.get("sd-name"); showMine();
+    chart = { open: false, x: "t", y: "best", hide: new Set(), picking: false };
+    hideCut();
+    $("#board").replaceChildren();
+    for (const s of ["#board", "#rivals", "#banner", "#after", "#graph"]) $(s).hidden = true;  // till the new round's first view
+    connect();
+  }
 
   setInterval(tick, 250);
 
@@ -1151,9 +1262,11 @@ function duelPage(id) {
     const v = view;
     if (!greeted) {
       greeted = true;
-      // already in it, or a lobby of a room you made or have played in: in you go. Anywhere else, "join".
-      const known = made().includes(v.room) || myRooms().some((r) => r.room === v.room);
-      if (savedName && v.setter?.id !== me && (v.players.some((p) => p.id === me) || (v.status === "lobby" && known))) join(savedName);
+      // already in it (your name refreshed), or a lobby with a seat: in you go, named or not (a first visit names
+      // itself in the box, and can't ready until it does). Mid-game, "sit in".
+      const inIt = v.players.some((p) => p.id === me);
+      const name = store.get("sd-name");  // (as it is now: it may have been given on this page, a round ago)
+      if (v.setter?.id !== me && (inIt ? name : v.status === "lobby" && v.players.length < v.max)) join(name ?? "");
     }
     remember(v);
     const setting = v.setter?.id === me;  // you set the word: you watch, seeing every word
@@ -1177,8 +1290,8 @@ function duelPage(id) {
       const tick = (p) => (p.ready ? el("span", { class: "ok", title: "ready" }, "✓") : "");
       const mine = v.players.find((p) => p.id === me);
       $("#mine").hidden = setting || (!mine && v.players.length >= v.max);
-      $("#mine .joinbtn").hidden = !!mine;
-      $("#mine .leavebtn").hidden = !mine;
+      $("#mine .joinbtn").hidden = $("#mine .spectating").hidden = !!mine;
+      $("#mine .standbtn").hidden = !mine;
       $("#mine .me").replaceChildren($("#name").value.trim() || mine?.name || "", ...(mine ? [tick(mine)] : []));
       // someone whose page has closed: greyed, "away"; the server drops them if they don't come back soon
       const away = (p) => v.here && !v.here.includes(p.id);
@@ -1188,10 +1301,10 @@ function duelPage(id) {
       $("#lobby .mode").replaceChildren(modeToggle(v.collab, mine && ((collab) => post(`${base}/collab`, { player: me, collab }).then((r) => r.view && apply(r.view)))));
       // everyone says ready, then the countdown starts by itself
       const go = $("#go");
-      go.disabled = !mine;
+      go.disabled = !mine || !store.get("sd-name");  // seated before you've named yourself: name first, then ready
       go.hidden = setting;
       go.classList.toggle("on", !!mine?.ready);
-      go.textContent = mine?.ready ? "not ready" : "ready";
+      go.textContent = mine?.ready ? "unready" : "ready";
       const unready = v.players.filter((p) => !p.ready && p.id !== me).map((p) => p.name);
       $("#lobby .wait").textContent = !mine?.ready ? ""
         : v.players.length < 2 ? "waiting for an opponent…"
@@ -1303,6 +1416,7 @@ function duelPage(id) {
     const bar = $("#voice"), st = voice.state;
     const inIt = v.players.some((p) => p.id === me) || v.setter?.id === me;  // the setter may talk too
     bar.hidden = !inIt || !window.RTCPeerConnection || !navigator.mediaDevices;
+    $("#mic").hidden = bar.hidden || st.status !== "on" || !st.tunable || !micOpen;
     if (bar.hidden) return;
     const members = v.voice ?? [];
     const nameOf = (id) => (id === me ? "you" : v.players.find((p) => p.id === id)?.name ?? (v.setter?.id === id ? v.setter.name : "?"));
@@ -1325,13 +1439,16 @@ function duelPage(id) {
         const label = nameOf(m.id) + (m.muted ? " (muted)" : failed ? " (can’t connect)" : "");
         return [i ? ", " : "", el("span", { class: cls }, label)];
       })));
-      kids.push(btn(st.muted ? "unmute" : "mute", () => voice.setMuted(!st.muted)), btn("leave", () => voice.leave()));
+      kids.push(btn(st.muted ? "unmute" : "mute", () => voice.setMuted(!st.muted)));
+      if (st.tunable) kids.push(btn(micOpen ? "done" : "mic", () => { micOpen = !micOpen; voiceBar(view); }));
+      kids.push(btn("leave", () => voice.leave()));
     }
     bar.replaceChildren(...kids);
   }
 
   // The room's record so far, between rounds and once you've finished: wins, and how you stand against each other player.
   let book = null, booked = null;  // the tally, and the duel and status it was fetched for
+  let roundsOpen = false;  // its list of the room's earlier rounds, open
   function record(v, mine) {
     const box = $("#tally");
     const when = `${v.id}:${v.status}`;
@@ -1339,11 +1456,16 @@ function duelPage(id) {
       booked = when;
       fetch(`${base}/tally`).then((r) => r.json()).then((t) => { book = t; if (view) record(view, view.players.find((p) => p.id === me)); }).catch(() => {});
     }
-    box.hidden = !(book?.rounds || book?.together) || !(v.status === "lobby" || v.status === "over" || mine?.finish);
+    const past = (book?.past ?? []).filter((r) => r.id !== v.id);  // the room's finished rounds, but the one on screen
+    box.hidden = !(book?.rounds || book?.together || past.length) || !(v.status === "lobby" || v.status === "over" || mine?.finish);
     if (box.hidden) return;
     const ps = Object.entries(book.players).sort(([, a], [, b]) => b.wins - a.wins || b.played - a.played);
     const top = ps[0]?.[1].wins;
-    const line1 = el("span", {}, book.rounds ? `this room · ${book.rounds} ${book.rounds === 1 ? "round" : "rounds"}: ` : "this room",
+    // "this room · N rounds" opens the list of its earlier rounds, each a link to that round as it ended
+    const head = book.rounds ? `this room · ${book.rounds} ${book.rounds === 1 ? "round" : "rounds"}` : "this room";
+    const toggle = past.length ? el("button", { type: "button", class: "more", "aria-expanded": String(roundsOpen) }, head, roundsOpen ? " ▴" : " ▾") : head;
+    if (past.length) toggle.onclick = () => { roundsOpen = !roundsOpen; record(v, mine); };  // (v, not view: there is none while the page moves on to a rematch)
+    const line1 = el("span", {}, toggle, book.rounds ? ": " : "",
       ...ps.flatMap(([id, p], i) => [i ? " · " : "", el("span", { class: top && p.wins === top ? "lead" : "" }, el("b", {}, id === me ? "you" : p.name), ` ${p.wins}`)]),
       ...(book.together ? [" · ", el("b", {}, `${book.together}`), " solved together"] : []));
     const vs = ps.filter(([id]) => id !== me).map(([id, p]) => {
@@ -1353,7 +1475,15 @@ function duelPage(id) {
       const [w, l] = flip ? [h[1], h[0]] : h;
       return `vs ${p.name} ${w}–${l}`;
     }).filter(Boolean);
-    box.replaceChildren(line1, ...(vs.length ? [el("span", {}, "you ", vs.join(" · "))] : []));
+    const list = roundsOpen && past.length ? el("ol", { class: "rounds" },
+      ...[...past].reverse().map((r) => el("li", {},
+        el("a", { href: `/d/${r.id}?round` }, `round ${r.n}`),
+        ` · ${r.number ? `#${r.number} · ` : ""}${r.secret} · ${startedAt(r.start)} · `,
+        r.collab ? (r.winner ? "solved together" : "not solved")
+        : r.winner ? el("span", { class: r.winner.id === me ? "lead" : "" }, el("b", {}, r.winner.id === me ? "you" : r.winner.name), ` won in ${mmss(r.winner.time)}`)
+        : "nobody found it")),
+      ...(pinned ? [el("li", {}, el("a", { href: `/d/${v.room ?? v.id}` }, "the room now →"))] : [])) : null;  // a ?round page: back to the latest
+    box.replaceChildren(line1, ...(vs.length ? [el("span", {}, "you ", vs.join(" · "))] : []), ...(list ? [list] : []));
   }
 
   // The rematch picker, a row of its own: compete or co-op | a random word, today's, the archive. Once proposed (`on`:
@@ -1380,7 +1510,7 @@ function duelPage(id) {
     const kids = [];
     if (v.next || v.rematch) picking = false;  // (so a withdrawn proposal leaves just "rematch")
     if (v.next) {
-      // everyone said yes: it's made, and in its lobby you ready up as ever
+      // a ?round page, staying on this round: the rematch is made, and in its lobby you ready up as ever
       const a = el("a", { href: `/d/${v.room}`, class: "lead" }, "on to the rematch →");
       a.onclick = () => carry(v.next);
       kids.push(a);
@@ -1411,9 +1541,9 @@ function duelPage(id) {
   }
 
   // The finished round as a chart: each player's similarity, by guess number or time on the round's clock, raw
-  // or as a rolling average, with faint lines where the proximity column's ranks 1, 500 and 850 fall. Hints are
+  // as a rolling average, or as the best so far (the default, so it only rises), with faint lines where the proximity column's ranks 1, 500 and 850 fall. Hints are
   // left out, being nobody's guess. Only once it's over, so it can't show a race still running.
-  let chart = { open: false, x: "t", avg: false, hide: new Set(), picking: false }, chartW = 0;  // hide: unticked in the legend's picker
+  let chart = { open: false, x: "t", y: "best", hide: new Set(), picking: false }, chartW = 0;  // hide: unticked in the legend's picker
   addEventListener("resize", () => { if (view && chart.open && $("#graph").clientWidth !== chartW) graph(view); });
   // a tap anywhere but the picker or the legend closes the picker (the path, since a tap in it may redraw it)
   addEventListener("click", (e) => {
@@ -1434,14 +1564,17 @@ function duelPage(id) {
         const recent = gs.slice(Math.max(0, k - 4), k + 1);  // up to the last five of their own
         return recent.reduce((sum, h) => sum + h.score, 0) / recent.length;
       });
-      const points = gs.map((g, k) => [byTime ? g.time : g.n, chart.avg ? avgs[k] : g.score]);
+      let top = -Infinity;
+      const bests = gs.map((g) => (top = Math.max(top, g.score)));  // the best of their own so far
+      const ys = { best: bests, raw: gs.map((g) => g.score), avg: avgs }[chart.y];
+      const points = gs.map((g, k) => [byTime ? g.time : g.n, ys[k]]);
       // a colour and a dash each, so no two of the eight players look alike, in colour or without it
       return { p, gs, avgs, points, color: GRAPH_COLORS[i % 4], dash: GRAPH_DASHES[(i + (i >> 2)) % 4] };
     });
     // in the proximity bar's own colour at that rank; labelled by nearness, rank 1 being the 1000th closest word
     const t = v.thresholds;
     const lines = t ? [[t.r1, 1, "1000th"], [t.r500, 500, "500th"], [t.r850, 850, "150th"]].filter(([y]) => y != null) : [];
-    // the axes fit everyone's scores, raw and averaged, and the lines, so they hold still as the options change. The
+    // the axes fit everyone's scores, raw and averaged (the best are among the raw), and the lines, so they hold still as the options change. The
     // found word's 100 would squash the rest under an empty gap, so it gets a band of its own above a break in the axis.
     const all = [...series.flatMap((s) => [...s.gs.map((g) => g.score), ...s.avgs]), ...lines.map(([y]) => y)], xs = series.flatMap((s) => s.points.map(([x]) => x));
     const found = all.some((y) => y >= 100), scores = all.filter((y) => y < 100);
@@ -1480,9 +1613,9 @@ function duelPage(id) {
     const plot = el("div", {});
     plot.innerHTML = `<svg class="plot" viewBox="0 0 ${W} ${H}" role="img" aria-label="each player's similarity over the round">${marks}</svg>`;  // numbers only: names stay in the legend
 
-    const avg = el("span", { class: "modes" }, ...[[false, "raw"], [true, "5-avg"]].map(([value, label]) => {
-      const b = el("button", { type: "button", "aria-pressed": String(chart.avg === value) }, label);
-      b.onclick = () => { chart.avg = value; graph(view); };
+    const avg = el("span", { class: "modes" }, ...[["best", "best"], ["raw", "raw"], ["avg", "5-avg"]].map(([value, label]) => {
+      const b = el("button", { type: "button", "aria-pressed": String(chart.y === value) }, label);
+      b.onclick = () => { chart.y = value; graph(view); };
       return b;
     }));
     const swatch = (s) => {
@@ -1586,7 +1719,9 @@ function duelPage(id) {
         if (known.some((g) => g.word === word)) { recall = word; flashRecall = true; return render(); }
         if (pending.includes(word)) return render();
         pending.push(word); render();
+        const round = id;
         const r = await post(`${base}/guess`, { player: me, word });
+        if (id !== round) return;  // the page has moved on to a rematch: whatever came of this word was the last round's
         pending = pending.filter((w) => w !== word);
         if (r.view) apply(r.view);  // draws it (once), unless the event stream already did
         if (!r.ok) {
