@@ -170,7 +170,8 @@
     .chip .mark, .chip .p { font-size: .78rem; color: var(--faint); }
     .chip .p .bar { display: none; }
     .chip.found .mark { color: var(--hot); }
-    #rivals .open ol { font-size: .92em; margin: .2em 0 0; max-height: 20em; overflow-y: auto; }  /* nine rows, like the desktop lists, so an opened list can't push your guess box off screen */
+    /* an opened list stops at about four and a half rows and scrolls, so it can't push your guess box down behind the keyboard */
+    #rivals .open ol { font-size: .92em; margin: .2em 0 0; max-height: 9.5em; overflow-y: auto; }
     #rivals .open:not(:empty) { border-bottom: 1px solid var(--rule); }
     #rivals .open ol li:last-child { border-bottom: 0; }
   }
