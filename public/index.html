@@ -1850,7 +1850,7 @@ function duelPage(id) {
     const lands = fresh && owner === me;
     const li = el("li", { "data-key": isLatest ? `${p.id}:latest` : `${owner}:${key}`, class: [isLatest && "latest", lands && "landed", fresh && !lands && "fresh", isAgain && "again", g.shared && "shared", g.check && "check", v.secret && g.word === v.secret && "secret"].filter(Boolean).join(" ") });
     li.append(
-      el("span", { class: "n num", title: g.shared ? "guessed by someone else too" : "" }, g.check ? "·" : g.n),
+      el("span", { class: "n num", "data-tip": [g.time != null && `at ${mmss(g.time)}`, g.shared && "guessed by someone else too"].filter(Boolean).join(" · ") }, g.check ? "·" : g.n),
       wordOf(g, p, g.hint && !v.collab ? tag("hint") : g.check ? tag("after") : ""),
       ...(v.collab ? [el("span", { class: g.hint ? "by hint" : "by" }, g.hint ? "hint" : owner === me ? "you" : v.players.find((q) => q.id === owner)?.name ?? "")] : []),
       el("span", { class: "s num", style: `color:${heat(g)}` }, g.score.toFixed(2)),
@@ -1869,13 +1869,15 @@ function tag(t) {
 }
 
 // A word (or co-op name) in a guess row that the row cut short with an ellipsis: its element and full text. Never a
-// hidden word, which must not give itself away.
+// hidden word, which must not give itself away. A guess number's tip (its time on the round clock) floats the same way.
 function cutOf(target) {
+  const n = target.closest?.("li .n[data-tip]");
+  if (n) return { e: n, text: n.dataset.tip };
   const cell = target.closest?.("li .w:not(.hidden), li .by");
   const e = cell?.querySelector(".t") ?? cell;
   return e && e.scrollWidth > e.clientWidth ? { e, text: e.textContent } : null;
 }
-// A cut word's full text floats near it: while a mouse hovers it, or after a tap (touch/pen) until the next tap, scroll or 2s.
+// A cut word's full text (or a number's tip) floats near it: while a mouse hovers it, or after a tap (touch/pen) until the next tap, scroll or 2s.
 // The tap is a pointerup, not a click: an iPhone sends no click for a tap on plain text. A mouse is driven by hover alone.
 let cutTip, cutTimer;
 function hideCut() { cutTip?.remove(); cutTip = null; clearTimeout(cutTimer); }
