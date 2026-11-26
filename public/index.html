@@ -1716,7 +1716,7 @@ function duelPage(id) {
     if (r.view) apply(r.view);  // draws it (once), unless the event stream already did
     if (!r.ok) {
       if (r.error === "already guessed") { recall = word; flashRecall = true; }
-      else notes = [...notes.filter((n) => n.word !== word), { word, msg: r.error === "upstream trouble" ? "server hiccup, try again" : r.error ?? "try again" }].slice(-3);
+      else notes = [...notes, { word, msg: r.error === "upstream trouble" ? "server hiccup, try again" : r.error ?? "try again" }].slice(-3);
       render();
     } else if (!r.view) render();
   };
