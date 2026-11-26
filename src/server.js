@@ -278,7 +278,10 @@ async function handle(req, res) {
   } else if (action === "join") {
     duel.join(player, msg.name, now);
   } else if (action === "leave") {
-    if (duel.leave(player, now)) room.voice.delete(player);  // voice is for the players
+    if (duel.leave(player, now)) {
+      room.voice.delete(player);  // voice is for the players
+      if (duel.startsAt) setTimeout(() => broadcast(room), duel.startsAt - now + 10);  // their leaving started the countdown
+    }
   } else if (action === "giveup") {
     duel.giveUp(player, now);
   } else if (action === "askgiveup") {
@@ -349,7 +352,10 @@ setInterval(() => {
     for (const id of [...room.duel.players.keys()]) {
       if (here.has(id)) { room.gone.delete(id); continue; }
       if (!room.gone.has(id)) room.gone.set(id, now);
-      else if (now - room.gone.get(id) > LOBBY_GONE_MS && room.duel.leave(id, now)) { room.gone.delete(id); dropped = true; }
+      else if (now - room.gone.get(id) > LOBBY_GONE_MS && room.duel.leave(id, now)) {
+        room.gone.delete(id); dropped = true;
+        if (room.duel.startsAt) setTimeout(() => broadcast(room), room.duel.startsAt - now + 10);  // it left the rest all ready
+      }
     }
     if (dropped) save(room.duel).then(() => broadcast(room), console.error);
   }

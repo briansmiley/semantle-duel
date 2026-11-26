@@ -135,7 +135,16 @@ export class Duel {
   /** Out of the lobby (they left before it started). Returns true if they were in it. */
   leave(playerId, now) {
     if (this.status(now) !== "lobby") return false;
-    return this.players.delete(playerId);
+    if (!this.players.delete(playerId)) return false;
+    this.startIfAllReady(now);  // the one who wasn't ready may be the one who left
+    return true;
+  }
+
+  /** Starts the countdown if two or more are in and all are ready; returns true if it did. */
+  startIfAllReady(now) {
+    if (this.players.size < 2 || ![...this.players.values()].every((q) => q.ready)) return false;
+    this.start(now);
+    return true;
   }
 
   start(now) {
@@ -150,9 +159,7 @@ export class Duel {
     if (!p) throw new DuelError("not in this duel");
     if (this.status(now) !== "lobby") throw new DuelError("already started");
     p.ready = ready;
-    if (this.players.size < 2 || ![...this.players.values()].every((q) => q.ready)) return false;
-    this.start(now);
-    return true;
+    return this.startIfAllReady(now);
   }
 
   /** Compete or collab, in the lobby. A change un-readies everyone, so nobody starts in a mode they didn't agree to. */
