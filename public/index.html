@@ -63,6 +63,8 @@
   #archive .back i { color: var(--hot); }
   #archive .goto { display: flex; flex-wrap: wrap; gap: .4rem 1rem; align-items: baseline; margin-top: 1.4rem; }
   #archive .goto input { width: 7em; font-size: 1.05rem; }
+  #archive .goto input::-webkit-inner-spin-button, #archive .goto input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  #archive .goto input { -moz-appearance: textfield; appearance: textfield; }
   #archive .goto button { border-bottom: 2px solid var(--hot); padding-bottom: 1px; }
   #archive .goto .why { flex-basis: 100%; color: var(--hot); font-style: italic; font-size: .95rem; }
   #archive .goto .why:empty { display: none; }
