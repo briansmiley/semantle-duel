@@ -355,6 +355,10 @@
   #report.tight textarea { flex: 1; min-width: 0; min-height: 0; resize: none; }
   #report.tight .acts { flex-direction: column-reverse; justify-content: center; align-items: center; gap: .7rem; }
   #report.tight .said:not(:empty) { position: absolute; left: max(1rem, calc(env(safe-area-inset-left) + .3rem)); bottom: max(.7rem, calc(env(safe-area-inset-bottom) + .25rem)); margin: 0; padding: 0 .35em; background: var(--paper); font-size: .9rem; }
+  /* ~40px tap targets for the small text controls, without moving anything: the extra hit area is an invisible band above and below */
+  :is(#pausebar button, #voice button, .giveup, #share, #report h2 button, #report .acts button, li.heads .sortby) { position: relative; }
+  :is(#pausebar button, #voice button, .giveup, #share, #report h2 button, #report .acts button, li.heads .sortby)::after { content: ""; position: absolute; inset: -8px 0; }
+  li.heads span:first-child .sortby { min-width: 2em; }
 </style>
 </head>
 <body>
