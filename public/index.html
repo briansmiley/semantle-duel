@@ -1512,7 +1512,8 @@ function duelPage(id) {
   // knowing who made it (by). Whoever is only watching gets the same board, without the box to type in.
   function roomSide(v) {
     const guesses = v.players.flatMap((p) => p.guesses.map((g) => ({ ...g, by: p.id }))).sort((a, b) => a.n - b.n);
-    return { id: me, guesses, checks: v.players.find((p) => p.id === me)?.checks, finish: v.players[0]?.finish ?? null };
+    const checks = v.players.flatMap((p) => (p.checks ?? []).map((c, k) => ({ ...c, by: p.id, k })));  // k: its place in theirs
+    return { id: me, guesses, checks, finish: v.players[0]?.finish ?? null };
   }
 
   // Each person's latest word (hints are nobody's).
@@ -1521,6 +1522,9 @@ function duelPage(id) {
     return el("div", { class: "lasts" }, ...ps.map((p) =>
       el("span", {}, el("b", {}, p.id === me ? "you" : p.name), " ", p.guesses.findLast((g) => !g.hint)?.word ?? "–")));
   }
+
+  // A player's list: their guesses and, among them, the words they checked after finishing, unnumbered.
+  const withChecks = (p) => [...p.guesses, ...(p.checks ?? []).map((c, k) => ({ ...c, n: null, k: c.k ?? k, check: true }))];
 
   function side(p, v) {
     const mine = p.id === me;
@@ -1582,8 +1586,7 @@ function duelPage(id) {
     }
 
     const ol = el("ol", {});
-    // words checked after finishing sit among the guesses, unnumbered
-    const all = [...p.guesses, ...(p.checks ?? []).map((c, k) => ({ ...c, n: null, k, check: true }))];
+    const all = withChecks(p);
     if (mine) pending = pending.filter((w) => !all.some((g) => g.word === w));
     if (mine && note && all.some((g) => g.word === note.word)) note = null;  // it got through after all
     const waiting = mine ? pending : [];
@@ -1662,9 +1665,9 @@ function duelPage(id) {
     if (openRival && !others.some((p) => p.id === openRival)) openRival = null;
     const lead = sorted[0];
     $("#rivals .strip").replaceChildren(...sorted.map((p) => {
-      const f = p.finish, b = best(p), last = p.guesses.at(-1);
+      const f = p.finish, b = best(p), last = withChecks(p).reduce((a, g) => (!a || g.at >= a.at ? g : a), null);
       const place = f?.found ? order.indexOf(p) + 1 : 0;
-      const fresh = last && seen !== null && !seen.has(`${p.id}:${last.n}`);
+      const fresh = last && seen !== null && !seen.has(`${p.id}:${last.check ? `c${last.k}` : last.n}`);
       const first = place === 1 || (!order.some((q) => q.finish?.found) && p === lead && b);
       const chip = el("button", { type: "button", class: ["chip", openRival === p.id && "on", fresh && "fresh", first && "first", f?.found && "found"].filter(Boolean).join(" ") },
         el("span", { class: "name" }, p.name),
@@ -1679,11 +1682,12 @@ function duelPage(id) {
     const p = others.find((q) => q.id === openRival);
     const box2 = $("#rivals .open");
     if (!p) return box2.replaceChildren();
-    const f = p.finish, last = p.guesses.at(-1), ol = el("ol", {});
-    if (last && p.guesses.length > 1) ol.append(row(last, p, v, true));
+    const all = withChecks(p), f = p.finish, ol = el("ol", {});
+    const last = all.reduce((a, g) => (!a || g.at >= a.at ? g : a), null);
+    if (last && all.length > 1) ol.append(row(last, p, v, true));
     if (f && !f.found && v.secret) ol.append(el("li", { class: "missed", "data-key": `${p.id}:missed` }, el("span", { class: "n" }, ""), el("span", { class: "w" }, v.secret), el("span", { class: "s num" }, "100.00"), el("span", { class: "p" }, "😞")));
-    for (const g of sortGuesses(p.guesses)) ol.append(row(g, p, v, false));
-    if (!p.guesses.length) ol.append(el("li", { class: "more" }, "no guesses yet"));
+    for (const g of sortGuesses(all)) ol.append(row(g, p, v, false));
+    if (!all.length) ol.append(el("li", { class: "more" }, "no guesses yet"));
     box2.replaceChildren(ol);
   }
 
@@ -1693,11 +1697,11 @@ function duelPage(id) {
     const fresh = (isLatest || p.guesses.length === 1) && seen !== null && !seen.has(`${owner}:${key}`);
     // yours lands quietly (the score fades in); someone else's gets a highlight
     const lands = fresh && owner === me;
-    const li = el("li", { "data-key": `${p.id}:${isLatest ? "latest" : key}`, class: [isLatest && "latest", lands && "landed", fresh && !lands && "fresh", isAgain && "again", g.shared && "shared", g.check && "check", v.secret && g.word === v.secret && "secret"].filter(Boolean).join(" ") });
+    const li = el("li", { "data-key": isLatest ? `${p.id}:latest` : `${owner}:${key}`, class: [isLatest && "latest", lands && "landed", fresh && !lands && "fresh", isAgain && "again", g.shared && "shared", g.check && "check", v.secret && g.word === v.secret && "secret"].filter(Boolean).join(" ") });
     li.append(
       el("span", { class: "n num", title: g.shared ? "guessed by someone else too" : "" }, g.check ? "·" : g.n),
       wordOf(g, p, g.hint && !v.collab ? tag("hint") : g.check ? tag("after") : ""),
-      ...(v.collab ? [el("span", { class: g.hint ? "by hint" : "by" }, g.hint ? "hint" : g.check ? "" : owner === me ? "you" : v.players.find((q) => q.id === owner)?.name ?? "")] : []),
+      ...(v.collab ? [el("span", { class: g.hint ? "by hint" : "by" }, g.hint ? "hint" : owner === me ? "you" : v.players.find((q) => q.id === owner)?.name ?? "")] : []),
       el("span", { class: "s num", style: `color:${heat(g)}` }, g.score.toFixed(2)),
       proximity(g),
     );
