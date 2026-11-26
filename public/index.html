@@ -1716,7 +1716,7 @@ function duelPage(id) {
     const lands = fresh && owner === me;
     const li = el("li", { "data-key": isLatest ? `${p.id}:latest` : `${owner}:${key}`, class: [isLatest && "latest", lands && "landed", fresh && !lands && "fresh", isAgain && "again", g.shared && "shared", g.check && "check", v.secret && g.word === v.secret && "secret"].filter(Boolean).join(" ") });
     li.append(
-      el("span", { class: "n num", title: g.shared ? "guessed by someone else too" : "" }, g.check ? "·" : g.n),
+      el("span", { class: "n num", title: [g.time != null && `at ${mmss(g.time)}`, g.shared && "guessed by someone else too"].filter(Boolean).join(" · ") }, g.check ? "·" : g.n),
       wordOf(g, p, g.hint && !v.collab ? tag("hint") : g.check ? tag("after") : ""),
       ...(v.collab ? [el("span", { class: g.hint ? "by hint" : "by" }, g.hint ? "hint" : owner === me ? "you" : v.players.find((q) => q.id === owner)?.name ?? "")] : []),
       el("span", { class: "s num", style: `color:${heat(g)}` }, g.score.toFixed(2)),
