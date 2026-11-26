@@ -1053,7 +1053,8 @@ function duelPage(id) {
     join(name).then((r) => r.view && apply(r.view));
   };
   $("#mine .leavebtn").onclick = () => {
-    clearTimeout(naming);
+    clearTimeout(naming);  // a name still on its way up would put you back in
+    voice.leave();  // voice is for the players: out of it too, or your mic stays open with its bar hidden
     post(`${base}/leave`, { player: me }).then((r) => r.view && apply(r.view));
   };
   // Your name in the list follows the box as you type; everyone else sees it once you pause.

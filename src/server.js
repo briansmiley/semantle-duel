@@ -278,7 +278,7 @@ async function handle(req, res) {
   } else if (action === "join") {
     duel.join(player, msg.name, now);
   } else if (action === "leave") {
-    duel.leave(player, now);
+    if (duel.leave(player, now)) room.voice.delete(player);  // voice is for the players
   } else if (action === "giveup") {
     duel.giveUp(player, now);
   } else if (action === "askgiveup") {
