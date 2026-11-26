@@ -1213,10 +1213,32 @@ function duelPage(id) {
     // a crowd: the first (you) on the left, everyone else stacked beside
     const drawn = sides.map((p) => side(p, v));
     const before = rowsAt();
-    // a crowd's lists scroll in their own boxes: each stays where it was scrolled to across the redraw
-    const scrolled = new Map([...board.querySelectorAll(".others ol")].map((ol) => [ol.parentNode.dataset.id, ol.scrollTop]));
-    board.replaceChildren(...(sides.length > 2 ? [drawn[0], el("div", { class: "others" }, ...drawn.slice(1))] : drawn));
-    for (const ol of board.querySelectorAll(".others ol")) ol.scrollTop = scrolled.get(ol.parentNode.dataset.id) ?? 0;
+    // A crowd's lists scroll in their own boxes, and a box being dragged or gliding stops dead if it's swapped
+    // for a new one. So each opponent's box (and everything round it) stays put, and only what's in it is redrawn.
+    const others = board.querySelector(":scope > .others");
+    if (sides.length <= 2 || !others) board.replaceChildren(...(sides.length > 2 ? [drawn[0], el("div", { class: "others" }, ...drawn.slice(1))] : drawn));
+    else {
+      const want = drawn.slice(1).map((s) => {
+        const was = [...others.children].find((c) => c.dataset.id === s.dataset.id), box = was?.querySelector(":scope > ol");
+        if (!box) return s;
+        const ol = s.querySelector(":scope > ol");
+        was.className = s.className;
+        box.replaceChildren(...ol.childNodes);
+        for (const n of [...was.childNodes]) if (n !== box) n.remove();
+        box.before(...[...s.childNodes].filter((n) => n !== ol));
+        return was;
+      });
+      for (const c of [...others.children]) if (!want.includes(c)) c.remove();
+      want.forEach((s, i) => {
+        if (others.children[i] === s) return;
+        // someone moved up the standings: their box is re-placed, which ends a scroll but not where it was
+        const box = s.querySelector(":scope > ol"), y = box.scrollTop;
+        others.insertBefore(s, others.children[i] ?? null);
+        box.scrollTop = y;
+      });
+      for (const c of [...board.children]) if (c !== others) c.remove();
+      others.before(drawn[0]);
+    }
     strip(v, sides.filter((p) => p.id !== me), inIt);
     glide(before);
     seen = new Set(v.players.flatMap((p) => [...p.guesses.map((g) => `${p.id}:${g.n}`), ...(p.checks ?? []).map((c, k) => `${p.id}:c${k}`)]));
