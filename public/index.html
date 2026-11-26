@@ -704,9 +704,12 @@ let currentView = null;  // the duel on screen, if any
     d.classList.toggle("tight", vv.height < fullHeight + 8);
   };
   const follow = () => { if (!vv) return; vv.addEventListener("resize", fit); vv.addEventListener("scroll", fit); fit(); };
-  d.addEventListener("close", () => { vv?.removeEventListener("resize", fit); vv?.removeEventListener("scroll", fit); place(null); d.classList.remove("tight"); });
-  // cancel throws the draft away; a tap outside only puts it aside
-  $("#report .cancel").onclick = () => { ta.value = ""; setImage(null); d.close(); };
+  // however it closes (cancel, Escape, a tap outside), the draft goes with it; one still sending is kept for its retry
+  d.addEventListener("close", () => {
+    vv?.removeEventListener("resize", fit); vv?.removeEventListener("scroll", fit); place(null); d.classList.remove("tight");
+    if (!sending) { ta.value = ""; setImage(null); }
+  });
+  $("#report .cancel").onclick = () => d.close();
 
   // A screenshot, picked, dropped or pasted: shrunk to a JPEG no bigger than 1600px on its longer side.
   let image = null;
@@ -730,7 +733,10 @@ let currentView = null;  // the duel on screen, if any
   d.addEventListener("paste", (e) => { const f = imageIn(e.clipboardData.files); if (f) { e.preventDefault(); attach(f); } });
   d.addEventListener("dragover", (e) => e.preventDefault());
   d.addEventListener("drop", (e) => { e.preventDefault(); attach(imageIn(e.dataTransfer.files)); });
-  d.onclick = (e) => { if (e.target === d) d.close(); };  // tap outside (braces: an onclick returning false would cancel the send)
+  // tap outside, but not a drag (selecting text) that only ends there (braces: an onclick returning false would cancel the send)
+  let pressedOutside = false;
+  d.addEventListener("pointerdown", (e) => (pressedOutside = e.target === d));
+  d.onclick = (e) => { if (e.target === d && pressedOutside) d.close(); };
   $("#report form").onsubmit = async (e) => {
     e.preventDefault();
     if (!ta.value.trim()) return ta.focus();
