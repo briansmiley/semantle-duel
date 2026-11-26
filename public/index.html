@@ -1340,8 +1340,9 @@ function duelPage(id) {
     board.classList.toggle("mine", inIt);
     const fresh = !input.isConnected || input.disabled;
     // a crowd: the first (you) on the left, everyone else stacked beside
-    const drawn = sides.map((p) => side(p, v));
+    // snapshot first: with the form up, side() redraws your own side in place, so rowsAt() after it sees the new rows
     const before = rowsAt();
+    const drawn = sides.map((p) => side(p, v));
     // A crowd's lists scroll in their own boxes, and a box being dragged or gliding stops dead if it's swapped
     // for a new one. So each opponent's box (and everything round it) stays put, and only what's in it is redrawn.
     const others = board.querySelector(":scope > .others");
