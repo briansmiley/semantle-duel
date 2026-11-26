@@ -1403,9 +1403,9 @@ function duelPage(id) {
   }
 
   // The finished round as a chart: each player's similarity, by guess number or time on the round's clock, raw
-  // or as a rolling average, with faint lines where the proximity column's ranks 1, 500 and 850 fall. Hints are
+  // as a rolling average, or as the best so far (the default, so it only rises), with faint lines where the proximity column's ranks 1, 500 and 850 fall. Hints are
   // left out, being nobody's guess. Only once it's over, so it can't show a race still running.
-  let chart = { open: false, x: "t", avg: false, hide: new Set(), picking: false }, chartW = 0;  // hide: unticked in the legend's picker
+  let chart = { open: false, x: "t", y: "best", hide: new Set(), picking: false }, chartW = 0;  // hide: unticked in the legend's picker
   addEventListener("resize", () => { if (view && chart.open && $("#graph").clientWidth !== chartW) graph(view); });
   // a tap anywhere but the picker or the legend closes the picker (the path, since a tap in it may redraw it)
   addEventListener("click", (e) => {
@@ -1426,14 +1426,17 @@ function duelPage(id) {
         const recent = gs.slice(Math.max(0, k - 4), k + 1);  // up to the last five of their own
         return recent.reduce((sum, h) => sum + h.score, 0) / recent.length;
       });
-      const points = gs.map((g, k) => [byTime ? g.time : g.n, chart.avg ? avgs[k] : g.score]);
+      let top = -Infinity;
+      const bests = gs.map((g) => (top = Math.max(top, g.score)));  // the best of their own so far
+      const ys = { best: bests, raw: gs.map((g) => g.score), avg: avgs }[chart.y];
+      const points = gs.map((g, k) => [byTime ? g.time : g.n, ys[k]]);
       // a colour and a dash each, so no two of the eight players look alike, in colour or without it
       return { p, gs, avgs, points, color: GRAPH_COLORS[i % 4], dash: GRAPH_DASHES[(i + (i >> 2)) % 4] };
     });
     // in the proximity bar's own colour at that rank; labelled by nearness, rank 1 being the 1000th closest word
     const t = v.thresholds;
     const lines = t ? [[t.r1, 1, "1000th"], [t.r500, 500, "500th"], [t.r850, 850, "150th"]].filter(([y]) => y != null) : [];
-    // the axes fit everyone's scores, raw and averaged, and the lines, so they hold still as the options change. The
+    // the axes fit everyone's scores, raw and averaged (the best are among the raw), and the lines, so they hold still as the options change. The
     // found word's 100 would squash the rest under an empty gap, so it gets a band of its own above a break in the axis.
     const all = [...series.flatMap((s) => [...s.gs.map((g) => g.score), ...s.avgs]), ...lines.map(([y]) => y)], xs = series.flatMap((s) => s.points.map(([x]) => x));
     const found = all.some((y) => y >= 100), scores = all.filter((y) => y < 100);
@@ -1472,9 +1475,9 @@ function duelPage(id) {
     const plot = el("div", {});
     plot.innerHTML = `<svg class="plot" viewBox="0 0 ${W} ${H}" role="img" aria-label="each player's similarity over the round">${marks}</svg>`;  // numbers only: names stay in the legend
 
-    const avg = el("span", { class: "modes" }, ...[[false, "raw"], [true, "5-avg"]].map(([value, label]) => {
-      const b = el("button", { type: "button", "aria-pressed": String(chart.avg === value) }, label);
-      b.onclick = () => { chart.avg = value; graph(view); };
+    const avg = el("span", { class: "modes" }, ...[["best", "best"], ["raw", "raw"], ["avg", "5-avg"]].map(([value, label]) => {
+      const b = el("button", { type: "button", "aria-pressed": String(chart.y === value) }, label);
+      b.onclick = () => { chart.y = value; graph(view); };
       return b;
     }));
     const swatch = (s) => {
