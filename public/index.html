@@ -797,7 +797,7 @@ function voiceChat(base, changed) {
     st.status = "asking"; st.error = null; changed();
     const ask = ++asks;
     let made = null;
-    try { made = new AudioContext(); } catch {}  // made inside the click, so audio may play; only for who's speaking
+    try { made = new AudioContext(); } catch {}  // made inside the click, so it may run: the mic's settings and who's speaking go through it
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
@@ -808,7 +808,7 @@ function voiceChat(base, changed) {
     }
     if (ask !== asks || st.status !== "asking") { for (const t of stream.getTracks()) t.stop(); made?.close(); return; }
     mic = stream; ctx = made;
-    if (ctx) tune(); else meter(me, mic);
+    if (ctx) tune();
     for (const t of tracks()) t.enabled = !st.muted;
     timer = setInterval(measure, 120);
     st.status = "on"; changed();
