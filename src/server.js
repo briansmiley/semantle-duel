@@ -67,23 +67,32 @@ async function puzzle(number) {
   return puzzles.get(number);
 }
 
-// Score locally when we have the vectors and Semantle's top-1000 list for this
-// secret; otherwise (or for a word we don't know) ask Semantle per guess.
+// Score locally when we have the vectors and Semantle's top-1000 list for this secret; otherwise (or for a
+// word we don't know) ask Semantle per guess. Should Semantle be down, a word we know is scored without a rank.
 const local = vectors.load(process.env.VECTORS_DIR ?? `${DATA}/vectors`);
 const nearby = new Map(); // secret -> Promise<Map word -> rank>
 // secret -> the scores at ranks 1, 500 and 850 of that same list, for the finished round's chart. Every rank
 // (ours or Semantle's per-guess percentile) is a place in this list, so the lines match the proximity column.
 const marks = new Map();
 
+// A top-1000 (or per-guess) fetch that failed isn't tried again for a while, so while Semantle stalls each
+// guess isn't held for a fresh timeout: it gets the best answer we have at once.
+const COOLDOWN_MS = 30_000;
+const downUntil = new Map(); // secret -> when to try its top-1000 again
+let asksDownUntil = 0; // when to try Semantle's per-guess scores again
+// a known word's guess waits at most this long in all, under the page's own 15 s
+const ASK_BUDGET_MS = 12_000;
+
 function ranked(secret) {
   if (!nearby.has(secret)) {
-    if (nearby.size > 50) { nearby.clear(); marks.clear(); }
+    if ((downUntil.get(secret) ?? 0) > Date.now()) return Promise.reject(new Error(`semantle: top1000 for ${secret} is down`));
+    if (nearby.size > 50) { nearby.clear(); marks.clear(); downUntil.clear(); }
     nearby.set(secret, semantle.neighbours(secret).then((list) => {
       const at = (rank) => list.find((n) => n.rank === rank)?.score ?? null;
       const m = { r1: at(1), r500: at(500), r850: at(850) };
       if (Object.values(m).some((x) => x !== null)) marks.set(secret, m);
       return new Map(list.map((n) => [n.word, n.rank]));
-    }).catch((e) => (nearby.delete(secret), Promise.reject(e))));
+    }).catch((e) => (nearby.delete(secret), downUntil.set(secret, Date.now() + COOLDOWN_MS), Promise.reject(e))));
   }
   return nearby.get(secret);
 }
@@ -91,11 +100,30 @@ function ranked(secret) {
 async function score(word, secret) {
   if (word === secret) return { score: 100, rank: 1000 };
   const v = await local;
-  if (v) {
-    const [sim, ranks] = await Promise.all([v.similarity(word, secret), ranked(secret).catch(() => null)]);
-    if (sim !== null && ranks) return { score: sim, rank: ranks.get(word) ?? null };
+  const sim = v && (await v.similarity(word, secret));
+  if (sim != null) {
+    const began = Date.now();
+    const ranks = await ranked(secret).catch(() => null);
+    if (ranks) return { score: sim, rank: ranks.get(word) ?? null };
+    // no top-1000: Semantle's per-guess answer still carries the rank, if it comes in time
+    if (Date.now() >= asksDownUntil) {
+      const wait = new Promise((r) => setTimeout(r, Math.max(0, ASK_BUDGET_MS - (Date.now() - began))).unref());
+      const asked = await Promise.race([semantle.score(word, secret), wait]).catch(() => undefined);
+      if (asked) return asked;
+      if (asked === undefined) asksDownUntil = Date.now() + COOLDOWN_MS;
+    }
+    // Semantle is down: our score still holds (it matches theirs), just not where it ranks
+    return { score: sim, rank: null, rankless: true };
   }
   return semantle.score(word, secret);
+}
+
+/** The room's score for `word`, asked once; one scored without its rank is asked again next time. */
+async function scoreIn(room, word) {
+  if (room.scores.has(word)) return room.scores.get(word);
+  const result = await score(word, room.duel.puzzle.secret);
+  if (!result?.rankless) room.scores.set(word, result);
+  return result;
 }
 
 function newId() {
@@ -328,16 +356,14 @@ async function handle(req, res) {
     const word = clean(msg.word);
     const why = duel.checkRefusal(player, word);
     if (why) return json(res, 409, { error: why });
-    if (!room.scores.has(word)) room.scores.set(word, await score(word, duel.puzzle.secret));
-    const result = room.scores.get(word);
+    const result = await scoreIn(room, word);
     if (!result) return json(res, 409, { error: unknown(word) });
     duel.check(player, word, result, Date.now());
   } else if (action === "guess") {
     const word = clean(msg.word);
     const why = duel.refusal(player, word, now);
     if (why) return json(res, 409, { error: why });
-    if (!room.scores.has(word)) room.scores.set(word, await score(word, duel.puzzle.secret));
-    const result = room.scores.get(word);
+    const result = await scoreIn(room, word);
     if (!result) return json(res, 409, { error: unknown(word) });
     duel.guess(player, word, result, Date.now());
   } else {
