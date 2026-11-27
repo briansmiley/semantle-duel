@@ -300,11 +300,10 @@ async function handle(req, res) {
     // warm the top-1000 for the chart's lines; a finished round waits for it, so its first view has them
     const warm = ranked(duel.puzzle.secret).catch(() => {});
     if (duel.status(Date.now()) === "over") await warm;
+    if (req.destroyed) return;  // gone while we waited: its "close" has fired, so a listener added now would never leave
     res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
     const l = { player, res };
     room.listeners.add(l);
-    if (duel.touch(player, Date.now()) || (duel.status(Date.now()) === "lobby" && duel.players.has(player))) { await save(duel); broadcast(room); }  // (in the lobby: they're back)
-    send(res, viewOf(room, player, Date.now()));
     // a named event (not a comment) so the page can tell a dead stream from a quiet one
     const ping = setInterval(() => res.write("event: ping\ndata: \n\n"), 15_000);
     req.on("close", () => {
@@ -315,6 +314,8 @@ async function handle(req, res) {
       if (gone && room.voice.has(player)) room.voice.delete(player);
       if (gone && (room.voice.size || room.duel.players.has(player))) broadcast(room);  // others see them away
     });
+    if (duel.touch(player, Date.now()) || (duel.status(Date.now()) === "lobby" && duel.players.has(player))) { await save(duel); broadcast(room); }  // (in the lobby: they're back)
+    send(res, viewOf(room, player, Date.now()));
     return;
   }
 
@@ -450,6 +451,7 @@ setInterval(() => {
 http
   .createServer((req, res) =>
     handle(req, res).catch((e) => {
+      if (res.headersSent) return console.error(e), res.destroy();  // mid-stream (a failed save on events): too late for a JSON error
       if (e instanceof DuelError) return json(res, 409, { error: e.message });
       console.error(e);
       json(res, 502, { error: "upstream trouble" });
