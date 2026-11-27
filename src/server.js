@@ -51,7 +51,10 @@ async function findRoom(id) {
   if (rooms.has(id)) return rooms.get(id);
   if (!/^[a-z0-9]{5}$/.test(id)) return null;
   let raw;
-  try { raw = await readFile(fileOf(id), "utf8"); } catch { return null; }
+  try { raw = await readFile(fileOf(id), "utf8"); } catch (e) {
+    if (e.code === "ENOENT") return null;
+    throw e;  // a read that failed is not a duel that's gone: the home page forgets rooms on 404
+  }
   if (!rooms.has(id)) rooms.set(id, { duel: Duel.fromJSON(JSON.parse(raw)), listeners: new Set(), scores: new Map(), voice: new Map() });
   return rooms.get(id);
 }

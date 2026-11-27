@@ -470,6 +470,7 @@ function remember(v) {
 function myRooms() {
   const by = new Map();
   for (const d of pastDuels()) {
+    if (d.gone) continue;  // the server cleared it out: not listed, not fetched again
     const room = d.room ?? d.id;
     if (!by.has(room)) by.set(room, { room, others: new Set(), rounds: [], at: 0 });
     const r = by.get(room);
@@ -488,9 +489,10 @@ async function roomsNow() {
   const rooms = myRooms().slice(0, 40);
   const heads = await Promise.all(rooms.map((r) =>
     fetch(`/d/${r.room}/head?player=${encodeURIComponent(me)}`).then((x) => x.json()).catch(() => null)));
-  // rooms the server has cleared out: forget them (not on network errors, which give no answer)
+  // rooms the server has cleared out: mark them gone (not on network errors, which give no answer). The entries
+  // stay, since they're also what this browser has played (random-draw avoid list, archive marks, "(played)")
   const gone = new Set(rooms.filter((r, i) => heads[i]?.error === "no such duel").map((r) => r.room));
-  if (gone.size) store.set("sd-history", JSON.stringify(pastDuels().filter((d) => !gone.has(d.room ?? d.id))));
+  if (gone.size) store.set("sd-history", JSON.stringify(pastDuels().map((d) => gone.has(d.room ?? d.id) ? { ...d, gone: true } : d)));
   const merged = new Map();  // head's room (or the room itself) -> room
   rooms.forEach((r, i) => {
     if (gone.has(r.room)) return;
