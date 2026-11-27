@@ -164,7 +164,10 @@ async function body(req, limit = 4096) {
     s += chunk;
     if (s.length > limit) throw new DuelError("too large");
   }
-  return s ? JSON.parse(s) : {};
+  let o;
+  try { o = s ? JSON.parse(s) : {}; } catch { throw new DuelError("bad request"); }
+  if (!o || typeof o !== "object") throw new DuelError("bad request");
+  return o;
 }
 
 function json(res, code, obj) {
@@ -407,7 +410,7 @@ setInterval(() => {
 http
   .createServer((req, res) =>
     handle(req, res).catch((e) => {
-      if (e instanceof DuelError || e instanceof SyntaxError) return json(res, 409, { error: e.message });
+      if (e instanceof DuelError) return json(res, 409, { error: e.message });
       console.error(e);
       json(res, 502, { error: "upstream trouble" });
     }),

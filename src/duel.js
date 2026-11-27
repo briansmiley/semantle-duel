@@ -125,6 +125,7 @@ export class Duel {
     const clean = String(name ?? "").trim().slice(0, 24) || "player";
     const p = this.players.get(playerId);
     if (p) return void (p.name = clean);
+    if (!/^[\da-f-]{1,64}$/i.test(playerId)) throw new DuelError("bad player id");  // the page makes UUIDs or hex, never a name like __proto__ (ids key `seen`)
     if (this.setter?.id === playerId) throw new DuelError("you set the word");
     if (this.status(now) === "over") throw new DuelError("it's over");
     if (this.players.size >= MAX_PLAYERS) throw new DuelError("full");
@@ -396,7 +397,7 @@ export class Duel {
  *   h2h is keyed "a|b" with a < b: [a's wins, b's wins]
  */
 export function tally(rounds, now) {
-  const players = {}, h2h = {}, past = [];
+  const players = Object.create(null), h2h = Object.create(null), past = [];  // keyed by player ids, so "__proto__" is just a key
   let n = 0, together = 0;
   for (const [i, d] of rounds.entries()) {
     if (d.status(now) !== "over") continue;  // (so a round still running never gives its word to `past`)
