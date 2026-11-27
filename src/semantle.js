@@ -23,7 +23,7 @@ async function get(path) {
 /** @returns {Promise<{number:number, secret:string, closest:number, tenth:number, thousandth:number}>} */
 export async function fetchPuzzle(number) {
   const g = await get(`/semantle/game/${number}/en`);
-  if (!g?.secretWord) throw new Error(`no puzzle #${number}`);
+  if (!g?.secretWord) throw Object.assign(new Error(`no puzzle #${number}`), { notFound: true });
   return {
     number,
     secret: g.secretWord,
