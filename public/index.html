@@ -1818,7 +1818,7 @@ function duelPage(id) {
     notes = notes.filter((n) => n.word !== word && Date.now() - n.at < 3000); recall = null;  // one that only just came back stays, to be seen
     const mineNow = view.players.find((q) => q.id === me);
     const known = [...(view.collab ? view.players.flatMap((q) => q.guesses) : mineNow?.guesses ?? []), ...(mineNow?.checks ?? [])];
-    if (known.some((g) => g.word === word)) { recall = word; flashRecall = true; return render(); }
+    if (known.some((g) => g.word === word)) { notes = []; recall = word; flashRecall = true; return render(); }  // notes would hide its "already guessed" row
     if (pending.includes(word)) return render();
     pending.push(word); render();
     const round = id;
