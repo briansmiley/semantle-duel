@@ -1339,8 +1339,6 @@ function duelPage(id) {
     board.classList.toggle("crowd", sides.length > 2);
     board.classList.toggle("mine", inIt);
     const fresh = !input.isConnected || input.disabled;
-    // focus on something in your side that's redrawn (a sort header you just clicked): back to the box, or it's lost
-    const within = !!form.parentNode?.contains(document.activeElement) && !form.contains(document.activeElement);
     // a crowd: the first (you) on the left, everyone else stacked beside
     // snapshot first: with the form up, side() redraws your own side in place, so rowsAt() after it sees the new rows
     const before = rowsAt();
@@ -1381,7 +1379,11 @@ function duelPage(id) {
     seen = new Set(v.players.flatMap((p) => [...p.guesses.map((g) => `${p.id}:${g.n}`), ...(p.checks ?? []).map((c, k) => `${p.id}:c${k}`)]));
     flashRecall = false;
     // the box is focused as it comes up to type in, not on every redraw (which would pull you back from anything else), never scrolling you up to it
-    if ((fresh || within) && v.status === "playing" && inIt && !matchMedia("(hover: none)").matches) input.focus({ preventScroll: true });
+    if (fresh && canType(v)) input.focus({ preventScroll: true });
+  }
+  // racing, at a keyboard: the box takes your typing (and is up, enabled, to take it)
+  function canType(v) {
+    return v?.status === "playing" && v.players.some((p) => p.id === me) && input.isConnected && !input.disabled && !matchMedia("(hover: none)").matches;
   }
 
   function pausebar(v, mine) {
@@ -1796,6 +1798,8 @@ function duelPage(id) {
   function pickSort(by) {
     sort = { by, dir: sort.by === by ? -sort.dir : SORTS[by].first };
     render();
+    // the header clicked (any side's) is redrawn away, or never took focus (Safari, Firefox on a Mac): back to the box
+    if (canType(view)) input.focus({ preventScroll: true });
   }
 
   // Rows move rather than jump: before a redraw, where each row was (by key); after it, each one starts
