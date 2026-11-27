@@ -141,6 +141,7 @@
   #lobby .who .away small { font-style: italic; font-size: .7em; }
   #lobby .who .ok { color: var(--hot); font-size: .8em; margin-left: .25em; }
   #lobby .who .me .ok { display: inline-block; }  /* out of the name's underline */
+  #lobby .intro { color: var(--faint); font-style: italic; margin: 0; }
   #lobby .wait { color: var(--faint); font-style: italic; margin-left: 1rem; }
   #lobby form { display: flex; gap: 1rem; align-items: baseline; }
   #go { font: 400 1.6rem var(--serif); border-bottom: 2px solid var(--hot); justify-self: start; }
@@ -413,6 +414,7 @@
   <div id="tally" hidden></div>
   <div id="graph" hidden></div>
   <section id="lobby" hidden>
+    <p class="intro"></p>
     <div class="who"><span id="mine"><form id="nameform"><input class="line" id="name" placeholder="your name" maxlength="24" autocomplete="off"></form><span class="me"></span><button type="button" class="pencil" title="change your name" aria-label="change your name"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4"/></svg></button><button type="button" class="standbtn">stand up</button><span class="spectating">spectating</span><button type="button" class="joinbtn">sit</button></span><span class="others"></span></div>
     <div class="mode"></div>
     <div><button id="go" disabled>ready</button><span class="wait"></span></div>
@@ -1136,6 +1138,7 @@ function duelPage(id) {
   let picking = false, today = null;  // rematch: choosing a puzzle
   let nextCollab = null;  // rematch: compete or collab, if changed from this round's
   let openRival = null;  // on a phone, whose list is open under the strip
+  let modeChanged = false;  // lobby: a compete/co-op switch cleared my ready, until I ready again
   fetch("/today").then((r) => r.json()).then((t) => { today = t.number; if (view) render(); }).catch(() => {});
 
   const join = (name) => post(`${base}/join`, { player: me, name });
@@ -1281,8 +1284,14 @@ function duelPage(id) {
 
   function apply(v) {
     if (v.id !== id || (view && v.now < view.now)) return;  // a round this page has moved on from, or an older snapshot arriving late
+    const prev = view;
     view = currentView = v;
     skew = view.now - Date.now();
+    // a mode switch clears everyone's ready: say so to whoever had it (until they ready again)
+    const was = prev?.players.find((p) => p.id === me);
+    if (was?.ready && !!prev.collab !== !!v.collab) modeChanged = true;
+    const seat = v.players.find((p) => p.id === me);
+    if (!seat || seat.ready) modeChanged = false;  // readied again, or stood up: a fresh seat has nothing to explain
     if (v.next && !racing() && !pinned) return into(v.next);  // the rematch is made: on into it (a ?round page links to it)
     voice.sync(v.voice);
     if (rejoinVoice && v.players.some((p) => p.id === me)) { rejoinVoice = false; voice.join(); }
@@ -1303,7 +1312,7 @@ function duelPage(id) {
     id = next; base = `/d/${id}`;
     view = currentView = null; drawn = null; greeted = false; stood = false;
     seen = null; input.value = ""; held = null; pending = []; recall = null; flashRecall = false; notes = [];
-    picking = false; nextCollab = null; openRival = null;
+    picking = false; nextCollab = null; openRival = null; modeChanged = false;
     editing = !store.get("sd-name"); showMine();
     chart = { open: false, x: "t", y: "best", hide: new Set(), picking: false };
     hideCut();
@@ -1372,7 +1381,17 @@ function duelPage(id) {
       go.classList.toggle("on", !!mine?.ready);
       go.textContent = mine?.ready ? "unready" : "ready";
       const unready = v.players.filter((p) => !p.ready && p.id !== me).map((p) => p.name);
-      $("#lobby .wait").textContent = !mine?.ready ? ""
+      // who asked you here and to what, until you've named yourself; and what a setter does
+      // (the first seated, who made it, unless that's you; "player" is an unnamed seat, not a name to show)
+      const first = v.players[0];
+      const host = v.setter ?? (first && first.id !== me && first.name !== "player" ? first : null);
+      const what = v.mode === "random" ? "a random word" : v.mode === "set" ? "their word"
+        : v.number === today ? "today’s Semantle word" : `Semantle #${v.number}`;
+      const intro = setting ? "send the link; you’ll watch every guess."
+        : host && !store.get("sd-name") ? `${host.name} invited you to ${v.collab ? "solve" : "race to"} ${what}.` : "";
+      $("#lobby .intro").textContent = intro;
+      $("#lobby .intro").hidden = !intro;  // empty, it would still take a grid gap
+      $("#lobby .wait").textContent = !mine?.ready ? (mine && modeChanged ? "mode changed: ready again." : "")
         : v.players.length < 2 ? "waiting for an opponent…"
         : unready.length ? `waiting for ${unready.join(", ")}…` : "";
     }
