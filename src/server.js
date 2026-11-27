@@ -19,7 +19,7 @@ const DATA = process.env.DATA_DIR ?? new URL("../data", import.meta.url).pathnam
 await mkdir(DATA, { recursive: true });
 
 /** Live duels. Every duel is also on disk, so links outlive the process. */
-/** @type {Map<string, {duel: Duel, listeners: Set<{player:string, res:http.ServerResponse}>, scores: Map<string, any>, voice: Map<string, {muted:boolean}>}>} */
+/** @type {Map<string, {duel: Duel, listeners: Set<{player:string, key:string, res:http.ServerResponse}>, scores: Map<string, any>, voice: Map<string, {muted:boolean}>}>} */
 const rooms = new Map();
 
 const fileOf = (id) => `${DATA}/${id}.json`;
@@ -196,7 +196,11 @@ const LOBBY_GONE_MS = Number(process.env.LOBBY_GONE_MS ?? 45_000);
 
 function broadcast(room) {
   const now = Date.now();
-  for (const l of room.listeners) send(l.res, viewOf(room, l.player, now));
+  for (const l of room.listeners) {
+    // a stream opened as a player before their seat had a key: once it has one, that stream must hold it
+    if (!owns(room.duel, l.player, l.key)) { l.res.destroy(); continue; }  // its "close" takes it out of the room
+    send(l.res, viewOf(room, l.player, now));
+  }
 }
 
 function send(res, view) {
@@ -321,7 +325,7 @@ async function handle(req, res) {
     if (duel.status(Date.now()) === "over") await warm;
     if (req.destroyed) return;  // gone while we waited: its "close" has fired, so a listener added now would never leave
     res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
-    const l = { player, res };
+    const l = { player, key, res };
     room.listeners.add(l);
     // a named event (not a comment) so the page can tell a dead stream from a quiet one
     const ping = setInterval(() => res.write("event: ping\ndata: \n\n"), 15_000);

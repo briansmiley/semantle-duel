@@ -16,7 +16,7 @@ export const AWAY_MS = Number(process.env.AWAY_MS ?? 90_000);
 /** @typedef {{at:number, found:boolean}} Finish */
 /** @typedef {{from:number, to:number|null, by:string|null}} Pause  by: who pressed pause, or null when everyone left */
 /** @typedef {{by:string, puzzle?:number, mode?:string, collab:boolean, avoid?:string[], asks:string[]}} Rematch  proposed, not yet made; asks: who has said yes */
-/** @typedef {{id:string, name:string, guesses:Guess[], finish:Finish|null, ready?:boolean, checks?:Check[]}} Player  ready: in the lobby, said they are set to go */
+/** @typedef {{id:string, name:string, guesses:Guess[], finish:Finish|null, ready?:boolean, checks?:Check[], key?:string}} Player  ready: in the lobby, said they are set to go; key: the hash of their browser's private key */
 
 export class Duel {
   /** @param {string} id @param {{number:number|null, secret:string, mode?:"random"|"set"}} puzzle  number: Semantle's, if it's one of theirs; null for our own words and set ones */
@@ -29,7 +29,7 @@ export class Duel {
     this.createdAt = now;
     /** @type {string|null} the rematch duel, once every player has said yes to one */ this.next = null;
     /** @type {Rematch|null} a rematch someone has proposed, until it's made (or withdrawn) */ this.rematch = null;
-    /** @type {{id:string, name:string}|null} whoever set the word (a "set" duel): watches, sees every word, doesn't play */ this.setter = null;
+    /** @type {{id:string, name:string, key?:string}|null} whoever set the word (a "set" duel): watches, sees every word, doesn't play; key: the hash of their browser's private key */ this.setter = null;
     /** the room: the first duel's id, kept by every rematch after it; its link always opens the latest round */ this.room = id;
     /** @type {Pause[]} */ this.pauses = [];
     /** @type {Record<string, number>} when each player was last heard from */ this.seen = {};
