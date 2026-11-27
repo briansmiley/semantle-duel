@@ -479,6 +479,7 @@ function standings(v) {
   return v.players.filter((p) => p.finish).sort((a, b) => (b.finish.found - a.finish.found) || (a.finish.at - b.finish.at));
 }
 
+let remembered = null;  // the entry last saved, less its time: an update that changes none of it isn't saved again
 function remember(v) {
   const mine = v.players.find((p) => p.id === me);
   if (!mine) return;
@@ -488,10 +489,12 @@ function remember(v) {
     found: mine.finish?.found ?? null,
     place: v.status === "over" && !v.collab && mine.finish?.found ? standings(v).indexOf(mine) + 1 : null,  // co-op has no places, so no wins
     secret: v.secret, time: mine.finish?.time ?? null,
-    start: v.startsAt,  // when the round began (at is just when this page last saw it)
-    at: Date.now(),
+    start: v.startsAt,  // when the round began (at is just when this page last saw it change)
   };
-  const list = [entry, ...pastDuels().filter((d) => d.id !== v.id)].slice(0, 200);
+  const sig = JSON.stringify(entry);
+  if (sig === remembered) return;
+  remembered = sig;
+  const list = [{ ...entry, at: Date.now() }, ...pastDuels().filter((d) => d.id !== v.id)].slice(0, 200);
   store.set("sd-history", JSON.stringify(list));
 }
 
@@ -1343,6 +1346,8 @@ function duelPage(id) {
     if (view.status === "countdown" && now >= view.startsAt) { view.status = "playing"; render(); }
   }
 
+  const narrow = matchMedia("(max-width: 700px)");  // the CSS's phone layout: rotating or resizing redraws
+  narrow.addEventListener("change", () => view && render());
   function render() {
     const v = view;
     if (!greeted) {
@@ -1443,14 +1448,15 @@ function duelPage(id) {
     // a crowd: the first (you) on the left, everyone else stacked beside
     // snapshot first: with the form up, side() redraws your own side in place, so rowsAt() after it sees the new rows
     const before = rowsAt();
-    const drawn = sides.map((p) => side(p, v));
+    // on a phone, in the race, the strip stands in for everyone else (the CSS hides their sides): so they aren't built
+    const drawn = (inIt && narrow.matches ? sides.slice(0, 1) : sides).map((p) => side(p, v));
     // A crowd's lists scroll in their own boxes, and a box being dragged or gliding stops dead if it's swapped
     // for a new one. So each opponent's box (and everything round it) stays put, and only what's in it is redrawn.
     const others = board.querySelector(":scope > .others");
-    if (sides.length <= 2 || !others) {
+    if (drawn.length <= 2 || !others) {
       // (yours may be the side already there, kept for its box)
       for (const n of [...board.childNodes]) if (n !== drawn[0]) n.remove();
-      const kids = sides.length > 2 ? [drawn[0], el("div", { class: "others" }, ...drawn.slice(1))] : drawn;
+      const kids = drawn.length > 2 ? [drawn[0], el("div", { class: "others" }, ...drawn.slice(1))] : drawn;
       board.append(...kids.slice(board.firstChild ? 1 : 0));
     }
     else {
