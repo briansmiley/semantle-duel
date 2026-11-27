@@ -1227,7 +1227,8 @@ function duelPage(id) {
     // a mode switch clears everyone's ready: say so to whoever had it (until they ready again)
     const was = prev?.players.find((p) => p.id === me);
     if (was?.ready && !!prev.collab !== !!v.collab) modeChanged = true;
-    if (v.players.find((p) => p.id === me)?.ready) modeChanged = false;
+    const seat = v.players.find((p) => p.id === me);
+    if (!seat || seat.ready) modeChanged = false;  // readied again, or stood up: a fresh seat has nothing to explain
     if (v.next && !racing() && !pinned) return into(v.next);  // the rematch is made: on into it (a ?round page links to it)
     voice.sync(v.voice);
     if (rejoinVoice && v.players.some((p) => p.id === me)) { rejoinVoice = false; voice.join(); }
@@ -1318,7 +1319,9 @@ function duelPage(id) {
       go.textContent = mine?.ready ? "unready" : "ready";
       const unready = v.players.filter((p) => !p.ready && p.id !== me).map((p) => p.name);
       // who asked you here and to what, until you've named yourself; and what a setter does
-      const host = v.setter ?? v.players.find((p) => p.id !== me && p.name);
+      // (the first seated, who made it, unless that's you; "player" is an unnamed seat, not a name to show)
+      const first = v.players[0];
+      const host = v.setter ?? (first && first.id !== me && first.name !== "player" ? first : null);
       const what = v.mode === "random" ? "a random word" : v.mode === "set" ? "their word"
         : v.number === today ? "today’s Semantle word" : `Semantle #${v.number}`;
       const intro = setting ? "send the link; you’ll watch every guess."
