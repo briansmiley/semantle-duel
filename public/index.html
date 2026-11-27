@@ -1319,9 +1319,8 @@ function duelPage(id) {
     banner.hidden = !mine?.finish && !winner;
     if (winner) {
       const found = standings(v).filter((p) => p.finish.found);
-      const names = found.map((p) => p.name), who = names.length < 3 ? names.join(" and ") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
       const last = v.players.filter((p) => !p.finish).length === 1;  // nobody else still racing: what's left is last place
-      banner.textContent = `${who} found it${found.length === 1 ? ` · ${mmss(winner.finish.time)}` : ""}. ${last ? "keep going" : `racing for ${ordinal(found.length + 1)}`}`;
+      banner.textContent = `${found.map((p) => p.name).join(", ")} ✓${found.length === 1 ? ` ${mmss(winner.finish.time)}` : ""} · ${last ? "keep going" : `racing for ${ordinal(found.length + 1)}`}`;
     } else if (mine?.finish) {
       const n = v.collab ? v.players.reduce((sum, p) => sum + p.guesses.length, 0) : mine.guesses.length;
       const finder = v.collab ? v.players.find((p) => p.guesses.some((g) => g.word === v.secret)) : mine;
