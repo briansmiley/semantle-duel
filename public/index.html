@@ -1144,7 +1144,7 @@ function duelPage(id) {
    // seen: guesses already drawn, so only new ones flash
   let sort = { by: "score", dir: -1 };  // the lists' order: a column of SORTS, and which way (-1: high to low). Best first to start
   let recall = null, flashRecall = false;  // a word I'd already guessed: shown up top again, like Semantle does
-  let notes = [];  // [{word, msg}]: why my recent words didn't count
+  let notes = [];  // [{word, msg, at}]: why my recent words didn't count (one with no `at`, a failed hint or give-up vote, goes on the next send)
   let picking = false, today = null;  // rematch: choosing a puzzle
   let nextCollab = null;  // rematch: compete or collab, if changed from this round's
   let openRival = null;  // on a phone, whose list is open under the strip
@@ -1882,7 +1882,7 @@ function duelPage(id) {
     ];
     top.forEach(([cls, key, kids], i) => {
       const latest = i === top.length - 1;
-      ol.append(el("li", { class: cls + (latest ? " latest" : ""), "data-key": `${p.id}:${key}` }, ...kids));
+      ol.append(el("li", { class: cls + (latest ? " latest" : ""), "data-key": `${p.id}:${key}`, "data-from": latest ? `${p.id}:latest` : null }, ...kids));
     });
     if (!top.length && again) ol.append(row(again, p, v, true, flashRecall));
     else if (!top.length && last && all.length > 1) ol.append(row(last, p, v, true));
@@ -1921,8 +1921,10 @@ function duelPage(id) {
   }
 
   // Rows move rather than jump: before a redraw, where each row was (by key); after it, each one starts
-  // there and slides to its new place, and rows that are new fade in. Only what's on screen (and, in a
-  // crowd's scrolling list, inside its box).
+  // there and slides to its new place, and rows that are new fade in. A row with no place of its own starts
+  // from its `data-from` row's, if that was there: the word just sent takes the latest row's place, and the
+  // scored latest row takes the place of the in-flight row it was. Only what's on screen (and, in a crowd's
+  // scrolling list, inside its box).
   function rowsAt() {
     const at = new Map();
     for (const li of document.querySelectorAll("#duel li[data-key]")) {
