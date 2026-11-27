@@ -1128,7 +1128,8 @@ function duelPage(id) {
     editing = false; showMine();
     if (view) render();
   };
-  $("#name").onblur = () => { blurred = true; $("#nameform").requestSubmit(); blurred = false; };
+  // (not when the code closed the box itself, as sit and stand up do: that blur comes after and would undo them)
+  $("#name").onblur = () => { if (!editing) return; blurred = true; $("#nameform").requestSubmit(); blurred = false; };
   $("#mine .joinbtn").onclick = () => {
     const name = $("#name").value.trim() || store.get("sd-name");
     if (!name) { editing = true; showMine(); return $("#name").focus(); }
@@ -1145,7 +1146,7 @@ function duelPage(id) {
     // like sit, standing up closes the name box; a name typed into it is kept for when you sit again
     const typed = $("#name").value.trim();
     if (typed) store.set("sd-name", typed);
-    editing = false; showMine();
+    editing = !(typed || store.get("sd-name")); showMine();  // with no name yet, the box stays open
     post(`${base}/leave`, { player: me }).then((r) => {
       if (!r.view) return;
       if (!r.view.players.some((p) => p.id === me)) voice.leave();  // (not if the round began first: then you're still in it)
