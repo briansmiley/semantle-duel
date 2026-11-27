@@ -141,6 +141,9 @@ function json(res, code, obj) {
   res.end(JSON.stringify(obj));
 }
 
+/** A typed word as we store it: iOS's curly apostrophes straightened, trimmed, lowercase. */
+const clean = (word) => String(word ?? "").replace(/[‘’ʼ]/g, "'").trim().toLowerCase();
+
 /**
  * A new duel on Semantle's puzzle `which` (today's if not given), or with `mode: "random"` a word drawn from
  * our list (not one in `avoid`), or with `word` one that `setter` chose (they watch; Semantle must know it).
@@ -150,8 +153,8 @@ async function createDuel(which, room = null, { mode, word, setter, avoid, colla
   const today = semantle.todaysNumber();
   let pick;
   if (word !== undefined) {
-    const w = String(word).trim().toLowerCase();
-    if (!/^[a-z][a-z'-]*$/.test(w) || !(await knows(w))) throw new DuelError("Semantle doesn’t know that word");
+    const w = clean(word);
+    if (!/^[a-z][a-z'-]{0,29}$/.test(w) || !(await knows(w))) throw new DuelError("Semantle doesn’t know that word");
     pick = { number: null, secret: w, mode: "set" };
   } else if (mode === "random") {
     const skip = new Set(Array.isArray(avoid) ? avoid.slice(0, 500).map(String) : []);
@@ -180,9 +183,11 @@ async function handle(req, res) {
   const url = new URL(req.url, "http://x");
   const parts = url.pathname.split("/").filter(Boolean);
 
-  if (req.method === "GET" && url.pathname === "/today") return json(res, 200, { number: semantle.todaysNumber() });
+  const read = req.method === "GET" || req.method === "HEAD";  // Node drops the body for HEAD
 
-  if (req.method === "GET" && (parts.length === 0 || url.pathname === "/archive" || (parts[0] === "d" && parts.length === 2))) {
+  if (read && url.pathname === "/today") return json(res, 200, { number: semantle.todaysNumber() });
+
+  if (read && (parts.length === 0 || url.pathname === "/archive" || (parts[0] === "d" && parts.length === 2))) {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     return res.end(await readFile(PAGE));
   }
@@ -320,7 +325,7 @@ async function handle(req, res) {
     }
   } else if (action === "guess" && duel.players.get(player)?.finish) {
     // finished: words are only checked, for their score, outside the race
-    const word = String(msg.word ?? "").trim().toLowerCase();
+    const word = clean(msg.word);
     const why = duel.checkRefusal(player, word);
     if (why) return json(res, 409, { error: why });
     if (!room.scores.has(word)) room.scores.set(word, await score(word, duel.puzzle.secret));
@@ -328,7 +333,7 @@ async function handle(req, res) {
     if (!result) return json(res, 409, { error: unknown(word) });
     duel.check(player, word, result, Date.now());
   } else if (action === "guess") {
-    const word = String(msg.word ?? "").trim().toLowerCase();
+    const word = clean(msg.word);
     const why = duel.refusal(player, word, now);
     if (why) return json(res, 409, { error: why });
     if (!room.scores.has(word)) room.scores.set(word, await score(word, duel.puzzle.secret));
