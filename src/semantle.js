@@ -13,17 +13,21 @@ export function todaysNumber(now = new Date()) {
   return Math.round((day - EPOCH) / DAY) + 1;
 }
 
+// A stalled request would hold every guess waiting on it (and on its cached promise) for minutes.
+const PATIENCE_MS = 8_000;
+
 async function get(path) {
-  const res = await fetch(BASE + path, { headers: HEADERS });
+  const res = await fetch(BASE + path, { headers: HEADERS, signal: AbortSignal.timeout(PATIENCE_MS) });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`semantle ${res.status} for ${path}`);
-  return res.json();
+  // not a SyntaxError, which the server would pass on to the player word for word
+  return res.json().catch(() => { throw new Error(`semantle: bad response for ${path}`); });
 }
 
 /** @returns {Promise<{number:number, secret:string, closest:number, tenth:number, thousandth:number}>} */
 export async function fetchPuzzle(number) {
   const g = await get(`/semantle/game/${number}/en`);
-  if (!g?.secretWord) throw new Error(`no puzzle #${number}`);
+  if (!g?.secretWord) throw Object.assign(new Error(`no puzzle #${number}`), { notFound: true });
   return {
     number,
     secret: g.secretWord,

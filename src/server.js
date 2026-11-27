@@ -1,7 +1,7 @@
 import http from "node:http";
 import { readFile, writeFile, rename, mkdir } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
-import { Duel, DuelError, tally } from "./duel.js";
+import { Duel, DuelError, tally, AWAY_MS } from "./duel.js";
 import * as semantle from "./semantle.js";
 import * as vectors from "./vectors.js";
 import { feedback } from "./feedback.js";
@@ -51,7 +51,10 @@ async function findRoom(id) {
   if (rooms.has(id)) return rooms.get(id);
   if (!/^[a-z0-9]{5}$/.test(id)) return null;
   let raw;
-  try { raw = await readFile(fileOf(id), "utf8"); } catch { return null; }
+  try { raw = await readFile(fileOf(id), "utf8"); } catch (e) {
+    if (e.code === "ENOENT") return null;
+    throw e;  // a read that failed is not a duel that's gone: the home page forgets rooms on 404
+  }
   if (!rooms.has(id)) rooms.set(id, { duel: Duel.fromJSON(JSON.parse(raw)), listeners: new Set(), scores: new Map(), voice: new Map() });
   return rooms.get(id);
 }
@@ -67,23 +70,32 @@ async function puzzle(number) {
   return puzzles.get(number);
 }
 
-// Score locally when we have the vectors and Semantle's top-1000 list for this
-// secret; otherwise (or for a word we don't know) ask Semantle per guess.
+// Score locally when we have the vectors and Semantle's top-1000 list for this secret; otherwise (or for a
+// word we don't know) ask Semantle per guess. Should Semantle be down, a word we know is scored without a rank.
 const local = vectors.load(process.env.VECTORS_DIR ?? `${DATA}/vectors`);
 const nearby = new Map(); // secret -> Promise<Map word -> rank>
 // secret -> the scores at ranks 1, 500 and 850 of that same list, for the finished round's chart. Every rank
 // (ours or Semantle's per-guess percentile) is a place in this list, so the lines match the proximity column.
 const marks = new Map();
 
+// A top-1000 (or per-guess) fetch that failed isn't tried again for a while, so while Semantle stalls each
+// guess isn't held for a fresh timeout: it gets the best answer we have at once.
+const COOLDOWN_MS = 30_000;
+const downUntil = new Map(); // secret -> when to try its top-1000 again
+let asksDownUntil = 0; // when to try Semantle's per-guess scores again
+// a known word's guess waits at most this long in all, under the page's own 15 s
+const ASK_BUDGET_MS = 12_000;
+
 function ranked(secret) {
   if (!nearby.has(secret)) {
-    if (nearby.size > 50) { nearby.clear(); marks.clear(); }
+    if ((downUntil.get(secret) ?? 0) > Date.now()) return Promise.reject(new Error(`semantle: top1000 for ${secret} is down`));
+    if (nearby.size > 50) { nearby.clear(); marks.clear(); downUntil.clear(); }
     nearby.set(secret, semantle.neighbours(secret).then((list) => {
       const at = (rank) => list.find((n) => n.rank === rank)?.score ?? null;
       const m = { r1: at(1), r500: at(500), r850: at(850) };
       if (Object.values(m).some((x) => x !== null)) marks.set(secret, m);
       return new Map(list.map((n) => [n.word, n.rank]));
-    }).catch((e) => (nearby.delete(secret), Promise.reject(e))));
+    }).catch((e) => (nearby.delete(secret), downUntil.set(secret, Date.now() + COOLDOWN_MS), Promise.reject(e))));
   }
   return nearby.get(secret);
 }
@@ -91,11 +103,30 @@ function ranked(secret) {
 async function score(word, secret) {
   if (word === secret) return { score: 100, rank: 1000 };
   const v = await local;
-  if (v) {
-    const [sim, ranks] = await Promise.all([v.similarity(word, secret), ranked(secret).catch(() => null)]);
-    if (sim !== null && ranks) return { score: sim, rank: ranks.get(word) ?? null };
+  const sim = v && (await v.similarity(word, secret));
+  if (sim != null) {
+    const began = Date.now();
+    const ranks = await ranked(secret).catch(() => null);
+    if (ranks) return { score: sim, rank: ranks.get(word) ?? null };
+    // no top-1000: Semantle's per-guess answer still carries the rank, if it comes in time
+    if (Date.now() >= asksDownUntil) {
+      const wait = new Promise((r) => setTimeout(r, Math.max(0, ASK_BUDGET_MS - (Date.now() - began))).unref());
+      const asked = await Promise.race([semantle.score(word, secret), wait]).catch(() => undefined);
+      if (asked) return asked;
+      if (asked === undefined) asksDownUntil = Date.now() + COOLDOWN_MS;
+    }
+    // Semantle is down: our score still holds (it matches theirs), just not where it ranks
+    return { score: sim, rank: null, rankless: true };
   }
   return semantle.score(word, secret);
+}
+
+/** The room's score for `word`, asked once; one scored without its rank is asked again next time. */
+async function scoreIn(room, word) {
+  if (room.scores.has(word)) return room.scores.get(word);
+  const result = await score(word, room.duel.puzzle.secret);
+  if (!result?.rankless) room.scores.set(word, result);
+  return result;
 }
 
 function newId() {
@@ -106,13 +137,43 @@ function newId() {
 // here (not saved): it goes out with every view, and the offers, answers and ICE candidates
 // between two of them are passed along the event stream, the sender stamped by us, never read.
 function viewOf(room, player, now) {
-  return { ...room.duel.viewFor(player, now), thresholds: marks.get(room.duel.puzzle.secret) ?? null, voice: [...room.voice].map(([id, v]) => ({ id, muted: v.muted })), here: present(room) };
+  return { ...room.duel.viewFor(player, now), thresholds: marks.get(room.duel.puzzle.secret) ?? null, voice: [...room.voice].map(([id, v]) => ({ id, muted: v.muted })), here: present(room), voters: voters(room, now).map((p) => p.id) };
 }
 
 /** The players with the page open right now. */
 function present(room) {
   return [...room.duel.players.keys()].filter((id) => [...room.listeners].some((l) => l.player === id));
 }
+
+/** Who a hint or a co-op give-up waits for: those racing and heard from lately (an open page says so every 10s), so one who left can't hold it up. */
+function voters(room, now) {
+  return room.duel.racers(now).filter((p) => now - room.duel.lastHeard(p) < AWAY_MS);
+}
+
+/** Everyone counted has asked for a hint: give one. Returns why not, if none can be given; either way the asks are spent. */
+async function grantHint(room) {
+  const { duel } = room;
+  const best = duel.bestRank(Date.now());
+  if (best >= 999) { duel.hintAsks = []; return "nothing closer but the word itself"; }
+  if (room.hinting) return null;  // one is on its way
+  room.hinting = true;
+  try { await pickHint(duel, best); } finally { room.hinting = false; }
+  return null;
+}
+
+async function pickHint(duel, best) {
+  // Semantle's own hint, given the best rank among those still racing (about a quarter of the way to the word).
+  // Should that fail: a neighbour a third of the way there, by rank.
+  const near = await semantle.neighbours(duel.puzzle.secret);
+  const theirs = await semantle.hint(duel.puzzle.secret, best).catch(() => null);
+  const target = Math.min(999, best + Math.max(1, Math.ceil((999 - best) / 3)));
+  const pick = near.find((n) => n.word === theirs && n.rank > best) ?? near.filter((n) => n.rank >= target).sort((a, b) => a.rank - b.rank)[0];
+  if (pick) duel.giveHint(pick.word, pick, Date.now());
+  else duel.hintAsks = [];
+}
+
+/** All of `voters` are among `asks` (and there is someone to vote). */
+const allAsked = (asks, vs) => vs.length > 0 && vs.every((p) => asks.includes(p.id));
 
 // In a lobby, someone whose page has been gone this long is dropped from it, so a player who left can't hold
 // up the start. Long enough for a phone to switch apps and come back.
@@ -133,13 +194,19 @@ async function body(req, limit = 4096) {
     s += chunk;
     if (s.length > limit) throw new DuelError("too large");
   }
-  return s ? JSON.parse(s) : {};
+  let o;
+  try { o = s ? JSON.parse(s) : {}; } catch { throw new DuelError("bad request"); }
+  if (!o || typeof o !== "object") throw new DuelError("bad request");
+  return o;
 }
 
 function json(res, code, obj) {
   res.writeHead(code, { "content-type": "application/json" });
   res.end(JSON.stringify(obj));
 }
+
+/** A typed word as we store it: iOS's curly apostrophes straightened, trimmed, lowercase. */
+const clean = (word) => String(word ?? "").replace(/[‘’ʼ]/g, "'").trim().toLowerCase();
 
 /**
  * A new duel on Semantle's puzzle `which` (today's if not given), or with `mode: "random"` a word drawn from
@@ -150,8 +217,8 @@ async function createDuel(which, room = null, { mode, word, setter, avoid, colla
   const today = semantle.todaysNumber();
   let pick;
   if (word !== undefined) {
-    const w = String(word).trim().toLowerCase();
-    if (!/^[a-z][a-z'-]*$/.test(w) || !(await knows(w))) throw new DuelError("Semantle doesn’t know that word");
+    const w = clean(word);
+    if (!/^[a-z][a-z'-]{0,29}$/.test(w) || !(await knows(w))) throw new DuelError("Semantle doesn’t know that word");
     pick = { number: null, secret: w, mode: "set" };
   } else if (mode === "random") {
     const skip = new Set(Array.isArray(avoid) ? avoid.slice(0, 500).map(String) : []);
@@ -180,9 +247,11 @@ async function handle(req, res) {
   const url = new URL(req.url, "http://x");
   const parts = url.pathname.split("/").filter(Boolean);
 
-  if (req.method === "GET" && url.pathname === "/today") return json(res, 200, { number: semantle.todaysNumber() });
+  const read = req.method === "GET" || req.method === "HEAD";  // Node drops the body for HEAD
 
-  if (req.method === "GET" && (parts.length === 0 || url.pathname === "/archive" || (parts[0] === "d" && parts.length === 2))) {
+  if (read && url.pathname === "/today") return json(res, 200, { number: semantle.todaysNumber() });
+
+  if (read && (parts.length === 0 || url.pathname === "/archive" || (parts[0] === "d" && parts.length === 2))) {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     return res.end(await readFile(PAGE));
   }
@@ -290,7 +359,7 @@ async function handle(req, res) {
   } else if (action === "giveup") {
     duel.giveUp(player, now);
   } else if (action === "askgiveup") {
-    duel.askGiveUp(player, !!msg.want, now);
+    duel.askGiveUp(player, !!msg.want, now, voters(room, now));
   } else if (action === "collab") {
     duel.setCollab(player, !!msg.collab, now);
   } else if (action === "ready") {
@@ -307,33 +376,24 @@ async function handle(req, res) {
       await room.rematch;
     }
   } else if (action === "hint") {
-    if (duel.askHint(player, !!msg.want, now)) {
+    if (duel.askHint(player, !!msg.want, now, voters(room, now))) {
       // Everyone agreed.
-      const best = duel.bestRank(now);
-      if (best >= 999) { duel.hintAsks = []; await save(duel); broadcast(room); return json(res, 409, { error: "nothing closer but the word itself" }); }
-      // Semantle's own hint, given the best rank among those still racing (about a quarter of the way to the word).
-      // Should that fail: a neighbour a third of the way there, by rank.
-      const near = await semantle.neighbours(duel.puzzle.secret);
-      const theirs = await semantle.hint(duel.puzzle.secret, best).catch(() => null);
-      const target = Math.min(999, best + Math.max(1, Math.ceil((999 - best) / 3)));
-      const pick = near.find((n) => n.word === theirs && n.rank > best) ?? near.filter((n) => n.rank >= target).sort((a, b) => a.rank - b.rank)[0];
-      if (pick) duel.giveHint(pick.word, pick, Date.now());
+      const why = await grantHint(room);
+      if (why) { await save(duel); broadcast(room); return json(res, 409, { error: why }); }
     }
   } else if (action === "guess" && duel.players.get(player)?.finish) {
     // finished: words are only checked, for their score, outside the race
-    const word = String(msg.word ?? "").trim().toLowerCase();
+    const word = clean(msg.word);
     const why = duel.checkRefusal(player, word);
     if (why) return json(res, 409, { error: why });
-    if (!room.scores.has(word)) room.scores.set(word, await score(word, duel.puzzle.secret));
-    const result = room.scores.get(word);
+    const result = await scoreIn(room, word);
     if (!result) return json(res, 409, { error: unknown(word) });
     duel.check(player, word, result, Date.now());
   } else if (action === "guess") {
-    const word = String(msg.word ?? "").trim().toLowerCase();
+    const word = clean(msg.word);
     const why = duel.refusal(player, word, now);
     if (why) return json(res, 409, { error: why });
-    if (!room.scores.has(word)) room.scores.set(word, await score(word, duel.puzzle.secret));
-    const result = room.scores.get(word);
+    const result = await scoreIn(room, word);
     if (!result) return json(res, 409, { error: unknown(word) });
     duel.guess(player, word, result, Date.now());
   } else {
@@ -345,11 +405,13 @@ async function handle(req, res) {
   return json(res, 200, { ok: true, view: viewOf(room, player, Date.now()) });
 }
 
-// Stop the clock in duels where everyone still playing has gone quiet; drop whoever has left a lobby.
+// Stop the clock in duels where everyone still playing has gone quiet; settle a vote whose last holdout has gone
+// quiet; drop whoever has left a lobby.
 setInterval(() => {
   const now = Date.now();
   for (const room of rooms.values()) {
     if (room.duel.checkAway(now)) save(room.duel).then(() => broadcast(room), console.error);
+    settleVotes(room, now).catch(console.error);
     if (room.duel.status(now) !== "lobby") { room.gone = null; continue; }
     room.gone ??= new Map();  // player -> since when their page has been gone
     const here = new Set(present(room));
@@ -366,6 +428,21 @@ setInterval(() => {
   }
 }, 5_000).unref();
 
+/** A hint or co-op give-up everyone still counted has asked for goes through, without anyone asking again. Also
+ * rebroadcasts when who counts changes, so pages stop waiting on (or start waiting on) the right people. */
+async function settleVotes(room, now) {
+  const { duel } = room;
+  const vs = voters(room, now);
+  const key = vs.map((p) => p.id).join();
+  const moved = room.voterKey !== undefined && key !== room.voterKey;
+  room.voterKey = key;
+  if (duel.collab && allAsked(duel.giveUpAsks, vs)) duel.finishAll(false, now);
+  else if (!duel.pause() && !room.hinting && allAsked(duel.hintAsks, vs)) await grantHint(room).catch((e) => { console.error(e); duel.hintAsks = []; });  // no retrying every 5s
+  else { if (moved) broadcast(room); return; }
+  await save(duel);
+  broadcast(room);
+}
+
 // Drop idle duels from memory; they stay on disk.
 setInterval(() => {
   for (const [id, r] of rooms) if (r.listeners.size === 0) rooms.delete(id);
@@ -375,7 +452,7 @@ http
   .createServer((req, res) =>
     handle(req, res).catch((e) => {
       if (res.headersSent) return console.error(e), res.destroy();  // mid-stream (a failed save on events): too late for a JSON error
-      if (e instanceof DuelError || e instanceof SyntaxError) return json(res, 409, { error: e.message });
+      if (e instanceof DuelError) return json(res, 409, { error: e.message });
       console.error(e);
       json(res, 502, { error: "upstream trouble" });
     }),
