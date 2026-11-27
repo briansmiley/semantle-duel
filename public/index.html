@@ -376,7 +376,7 @@
     <button data-puzzle="set" class="quiet" title="you pick the word and watch">custom</button>
     <a href="/archive" class="quiet">archive</a>
   </nav>
-  <form id="setword" hidden><input class="line" placeholder="the secret word" maxlength="30" autocomplete="off" autocapitalize="off" spellcheck="false"><button>make the duel</button><span class="why"></span></form>
+  <form id="setword" hidden><input class="line" placeholder="the secret word" maxlength="30" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"><button>make the duel</button><span class="why"></span></form>
 </main>
 
 <main id="archive" hidden>
@@ -1727,7 +1727,7 @@ function duelPage(id) {
 
   // Your box to type in is made once and kept on the page, its side redrawn round it (see side): one built afresh
   // on every update would move the caret, lose a phone keyboard's word in progress, and undo a give-up's "sure?".
-  const input = el("input", { class: "line", id: "guess", autocomplete: "off", autocapitalize: "off", spellcheck: "false", enterkeyhint: "go" });
+  const input = el("input", { class: "line", id: "guess", autocomplete: "off", autocapitalize: "off", autocorrect: "off", maxlength: "30", spellcheck: "false", enterkeyhint: "go" });
   let held = null;  // a word half typed when the round paused, out of the box so its placeholder says who paused
   const submit = el("button", { class: "submit", type: "submit" }, "guess");
   submit.onpointerdown = (e) => e.preventDefault();  // keep the keyboard up on phones
@@ -1743,7 +1743,7 @@ function duelPage(id) {
   const form = el("form", {}, input, submit, quit), spot = new Comment();  // spot: where the box goes in a side redrawn
   form.onsubmit = async (e) => {
     e.preventDefault();
-    const word = input.value.trim().toLowerCase();
+    const word = input.value.replace(/[‘’ʼ]/g, "'").trim().toLowerCase();  // the stored form (server clean()), so duplicate checks match
     if (!word) return;
     input.value = "";
     note = null; recall = null;
