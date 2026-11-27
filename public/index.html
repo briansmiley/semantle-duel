@@ -1182,10 +1182,10 @@ function duelPage(id) {
   // server pings every 15s and we reconnect when it's gone quiet. A stream down for more than a blip
   // (a deploy restarts the server) shows #away until one opens again, then reloads the page. Only for a duel we've seen:
   // a link to no duel never opens a stream, and that's not the server updating.
-  let es = null, heard = 0, away = null;
+  let es = null, heard = 0, started = 0, away = null;
   const connect = () => {
     es?.close();
-    heard = Date.now();
+    heard = started = Date.now();
     es = new EventSource(`${base}/events?player=${encodeURIComponent(me)}`);
     es.onopen = () => { clearTimeout(away); away = null; if (!$("#away").hidden) location.reload(); };  // after a real outage: reload for the deploy's new client code (voice carries over via pagehide)
     es.onerror = () => { if (view && !away) away = setTimeout(() => ($("#away").hidden = false), 2_000); };
@@ -1218,7 +1218,20 @@ function duelPage(id) {
   connect();
   // (a stream the browser gave up on, say on a 502 mid-deploy, is retried here too)
   setInterval(() => (es.readyState === EventSource.CLOSED || Date.now() - heard > 40_000) && connect(), 5_000);
-  document.addEventListener("visibilitychange", () => !document.hidden && Date.now() - heard > 20_000 && connect());
+  // back on the page: a phone may have dropped the stream while we were away, so don't wait for the watchdog
+  // (past 16s quiet, a ping is missing). A stream that died silently still reads as open, so if it looks fine,
+  // check again once the next ping is due. A connect started in the last 3s is left to finish (a back/forward-cache
+  // restore fires both events; a tab opened in the background may still be waiting on its first connect).
+  // A page back from the back/forward cache always reconnects.
+  let recheck = null;
+  const fresh = () => Date.now() - started < 3_000;
+  document.addEventListener("visibilitychange", () => {
+    clearTimeout(recheck);
+    if (document.hidden) return;
+    if ((es.readyState !== EventSource.OPEN && !fresh()) || Date.now() - heard > 16_000) return connect();
+    recheck = setTimeout(() => !document.hidden && es.readyState === EventSource.OPEN && Date.now() - heard > 16_000 && connect(), 16_500 - (Date.now() - heard));
+  });
+  addEventListener("pageshow", (e) => e.persisted && !fresh() && connect());
 
   // tell the server we're still here (even from a background tab), so it can stop the
   // clock once everyone racing has actually disconnected
