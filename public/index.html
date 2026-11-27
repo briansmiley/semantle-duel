@@ -50,6 +50,7 @@
   #home nav { display: flex; flex-wrap: wrap; gap: .8rem 2rem; justify-content: center; }
   #setword { display: flex; flex-wrap: wrap; gap: .6rem 1rem; align-items: baseline; justify-content: center; }
   #setword input { width: 11em; font-size: 1.15rem; text-align: center; }
+  #setword [name=word] { width: 16em; }  /* its placeholder is the explanation */
   #setword button { white-space: nowrap; font-size: 1.15rem; border-bottom: 2px solid var(--hot); padding-bottom: 1px; }
   #home nav button { font-size: 1.15rem; border-bottom: 1.5px solid currentColor; padding-bottom: 2px; }
   #home nav button, #home nav a { font-size: 1.15rem; border-bottom: 1.5px solid currentColor; padding-bottom: 2px; color: inherit; text-decoration: none; }
@@ -384,7 +385,7 @@
     <button data-puzzle="set" class="quiet" title="you pick the word and watch">custom</button>
     <a href="/archive" class="quiet">archive</a>
   </nav>
-  <form id="setword" hidden><input class="line" placeholder="the secret word" maxlength="30" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"><button>make the duel</button></form>
+  <form id="setword" hidden><input class="line" name="name" placeholder="your name" maxlength="24" autocomplete="off"><input class="line" name="word" placeholder="a word for them to find; you watch" maxlength="30" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"><button>make the duel</button></form>
 </main>
 
 <main id="archive" hidden>
@@ -1060,15 +1061,18 @@ else {
   }).catch(() => {});
   for (const b of document.querySelectorAll("#home nav button")) {
     const kind = b.dataset.puzzle;
-    if (kind === "set") b.onclick = () => { $("#setword").hidden = false; $("#setword input").focus(); };
+    if (kind === "set") b.onclick = () => { $("#setword").hidden = false; $("#setword [name=word]").focus(); };
     else if (kind === "random") b.onclick = () => newDuel(undefined, b, { mode: "random", avoid: playedWords() });
     else b.onclick = () => newDuel(undefined, b);
   }
   // set a word: you make the duel and watch it, seeing every word
+  $("#setword [name=name]").value = store.get("sd-name") ?? "";
   $("#setword").onsubmit = (e) => {
     e.preventDefault();
-    const word = $("#setword input").value.trim();
-    if (word) newDuel(undefined, $("#setword button"), { word, player: me, name: store.get("sd-name") ?? "" });
+    const word = $("#setword [name=word]").value.trim(), name = $("#setword [name=name]").value.trim();
+    if (!word) return;
+    if (name) store.set("sd-name", name);
+    newDuel(undefined, $("#setword button"), { word, player: me, name });
   };
 }
 
