@@ -11,7 +11,7 @@
 <link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet">
 <style>
   :root {
-    --paper: #f6f3ec; --ink: #1d1b18; --faint: #8b857a; --rule: #ddd6c8;
+    --paper: #f6f3ec; --ink: #1d1b18; --faint: #736e60; --rule: #ddd6c8;
     --serif: "EB Garamond", Garamond, Georgia, serif;
     --hot: #d4471f; --warm: #d98b2b; --cool: #6b8fa3; --you: #1d1b18;
   }
@@ -79,6 +79,7 @@
 
   /* duel */
   #duel { max-width: 980px; margin: 0 auto; padding: 18px 16px 60px; }
+  #duel > a { color: inherit; }
   header { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
   header .no { color: var(--faint); text-decoration: none; border-bottom: 1px dotted var(--faint); }
   header .no:hover { color: var(--ink); }
@@ -121,6 +122,7 @@
   #lobby .who span.me { text-decoration: underline; text-underline-offset: 4px; }
   #lobby .who .others { display: contents; }
   #mine { display: inline-flex; align-items: baseline; gap: .3em; }
+  #mine .me, #lobby .who .others > span { overflow-wrap: anywhere; }
   #mine input { font-size: inherit; width: 8em; }
   #mine .joinbtn { margin-left: .5em; border-bottom: 2px solid var(--hot); padding-bottom: 1px; }
   #mine .spectating { margin-left: .5em; color: var(--faint); font-style: italic; font-size: .8em; }
@@ -170,7 +172,8 @@
     .chip .mark, .chip .p { font-size: .78rem; color: var(--faint); }
     .chip .p .bar { display: none; }
     .chip.found .mark { color: var(--hot); }
-    #rivals .open ol { font-size: .92em; margin: .2em 0 0; }
+    /* an opened list stops at about four and a half rows and scrolls, so it can't push your guess box down behind the keyboard */
+    #rivals .open ol { font-size: .92em; margin: .2em 0 0; max-height: 9.5em; overflow-y: auto; }
     #rivals .open:not(:empty) { border-bottom: 1px solid var(--rule); }
     #rivals .open ol li:last-child { border-bottom: 0; }
   }
@@ -355,6 +358,10 @@
   #report.tight textarea { flex: 1; min-width: 0; min-height: 0; resize: none; }
   #report.tight .acts { flex-direction: column-reverse; justify-content: center; align-items: center; gap: .7rem; }
   #report.tight .said:not(:empty) { position: absolute; left: max(1rem, calc(env(safe-area-inset-left) + .3rem)); bottom: max(.7rem, calc(env(safe-area-inset-bottom) + .25rem)); margin: 0; padding: 0 .35em; background: var(--paper); font-size: .9rem; }
+  /* ~40px tap targets for the small text controls, without moving anything: the extra hit area is an invisible band above and below */
+  :is(#pausebar button, #voice button, .giveup, #share, #report h2 button, #report .acts button, li.heads .sortby) { position: relative; }
+  :is(#pausebar button, #voice button, .giveup, #share, #report h2 button, #report .acts button, li.heads .sortby)::after { content: ""; position: absolute; inset: -8px 0; }
+  li.heads span:first-child .sortby { min-width: 2em; }
 </style>
 </head>
 <body>
@@ -1075,9 +1082,15 @@ async function archivePage() {
 // and stays on it once its rematch is made, with a link on to it. (pinned is set up top: the pages open before here)
 async function openDuel(code) {
   let id = code;
-  if (!pinned) {
-    try { id = (await (await fetch(`/d/${code}/head?player=${encodeURIComponent(me)}`)).json()).id ?? code; } catch {}
-  }
+  try {
+    const r = await fetch(`/d/${code}/head?player=${encodeURIComponent(me)}`);
+    if (r.status === 404) {  // mistyped, or gone from the volume
+      $("#duel").replaceChildren(el("p", {}, "no such duel. it may have expired."), el("a", { href: "/" }, "home"));
+      $("#duel").hidden = false;
+      return;
+    }
+    if (!pinned) id = (await r.json()).id ?? code;
+  } catch {}
   duelPage(id);
 }
 
@@ -1379,7 +1392,11 @@ function duelPage(id) {
     seen = new Set(v.players.flatMap((p) => [...p.guesses.map((g) => `${p.id}:${g.n}`), ...(p.checks ?? []).map((c, k) => `${p.id}:c${k}`)]));
     flashRecall = false;
     // the box is focused as it comes up to type in, not on every redraw (which would pull you back from anything else), never scrolling you up to it
-    if (fresh && v.status === "playing" && inIt && !matchMedia("(hover: none)").matches) input.focus({ preventScroll: true });
+    if (fresh && canType(v)) input.focus({ preventScroll: true });
+  }
+  // racing, at a keyboard: the box takes your typing (and is up, enabled, to take it)
+  function canType(v) {
+    return v?.status === "playing" && v.players.some((p) => p.id === me) && input.isConnected && !input.disabled && !matchMedia("(hover: none)").matches;
   }
 
   function pausedText(v) {
@@ -1693,10 +1710,13 @@ function duelPage(id) {
   const submit = el("button", { class: "submit", type: "submit" }, "guess");
   submit.onpointerdown = (e) => e.preventDefault();  // keep the keyboard up on phones
   const quit = el("button", { class: "giveup", type: "button" }, "give up");
+  let unsure;  // the "sure?" lapsing: one at a time, the box (and so this button) being kept
+  const calm = () => { clearTimeout(unsure); delete quit.dataset.sure; quit.textContent = "give up"; };
   quit.onclick = () => {
-    if (quit.dataset.sure) return post(`${base}/giveup`, { player: me }).then((r) => r.view && apply(r.view));
+    if (quit.dataset.sure) { calm(); return post(`${base}/giveup`, { player: me }).then((r) => r.view && apply(r.view)); }
+    clearTimeout(unsure);
     quit.dataset.sure = 1; quit.textContent = "sure?";
-    setTimeout(() => { delete quit.dataset.sure; quit.textContent = "give up"; }, 2500);
+    unsure = setTimeout(calm, 2500);
   };
   const form = el("form", {}, input, submit, quit), spot = new Comment();  // spot: where the box goes in a side redrawn
   form.onsubmit = async (e) => {
@@ -1799,6 +1819,8 @@ function duelPage(id) {
   function pickSort(by) {
     sort = { by, dir: sort.by === by ? -sort.dir : SORTS[by].first };
     render();
+    // the header clicked (any side's) is redrawn away, or never took focus (Safari, Firefox on a Mac): back to the box
+    if (canType(view)) input.focus({ preventScroll: true });
   }
 
   // Rows move rather than jump: before a redraw, where each row was (by key); after it, each one starts
@@ -1838,12 +1860,12 @@ function duelPage(id) {
     const key = (p) => (p.finish?.found ? order.indexOf(p) - 1e6 : p.finish ? 1e6 : -(best(p)?.score ?? -1e3));
     const sorted = [...others].sort((a, b) => key(a) - key(b));
     if (openRival && !others.some((p) => p.id === openRival)) openRival = null;
-    const lead = sorted[0];
+    const lead = sorted[0], mine = best(v.players.find((q) => q.id === me) ?? { guesses: [] });
     $("#rivals .strip").replaceChildren(...sorted.map((p) => {
       const f = p.finish, b = best(p), last = withChecks(p).reduce((a, g) => (!a || g.at >= a.at ? g : a), null);
       const place = f?.found ? order.indexOf(p) + 1 : 0;
       const fresh = last && seen !== null && !seen.has(`${p.id}:${last.check ? `c${last.k}` : last.n}`);
-      const first = place === 1 || (!order.some((q) => q.finish?.found) && p === lead && b);
+      const first = place === 1 || (!f && !order.some((q) => q.finish?.found) && p === lead && b && b.score > (mine?.score ?? -Infinity));
       const chip = el("button", { type: "button", class: ["chip", openRival === p.id && "on", fresh && "fresh", first && "first", f?.found && "found"].filter(Boolean).join(" ") },
         el("span", { class: "name" }, p.name),
         f?.found ? el("span", { class: "mark num" }, `${ordinal(place)} · ${mmss(f.time)}`)
@@ -1857,13 +1879,17 @@ function duelPage(id) {
     const p = others.find((q) => q.id === openRival);
     const box2 = $("#rivals .open");
     if (!p) return box2.replaceChildren();
-    const all = withChecks(p), f = p.finish, ol = el("ol", {});
+    const all = withChecks(p), f = p.finish, ol = el("ol", { "data-id": p.id });
     const last = all.reduce((a, g) => (!a || g.at >= a.at ? g : a), null);
     if (last && all.length > 1) ol.append(row(last, p, v, true));
     if (f && !f.found && v.secret) ol.append(el("li", { class: "missed", "data-key": `${p.id}:missed` }, el("span", { class: "n" }, ""), el("span", { class: "w" }, v.secret), el("span", { class: "s num" }, "100.00"), el("span", { class: "p" }, "😞")));
     for (const g of sortGuesses(all)) ol.append(row(g, p, v, false));
     if (!all.length) ol.append(el("li", { class: "more" }, "no guesses yet"));
-    box2.replaceChildren(ol);
+    // the open list scrolls in its own box, and a box being dragged or gliding stops dead if it's swapped for a
+    // new one; so while the same rival stays open only what's in it is redrawn (a different rival starts at the top)
+    const was = box2.querySelector(":scope > ol");
+    if (was && was.dataset.id === p.id) was.replaceChildren(...ol.childNodes);
+    else box2.replaceChildren(ol);
   }
 
   function row(g, p, v, isLatest, isAgain = false) {

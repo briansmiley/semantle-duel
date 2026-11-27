@@ -180,9 +180,11 @@ async function handle(req, res) {
   const url = new URL(req.url, "http://x");
   const parts = url.pathname.split("/").filter(Boolean);
 
-  if (req.method === "GET" && url.pathname === "/today") return json(res, 200, { number: semantle.todaysNumber() });
+  const read = req.method === "GET" || req.method === "HEAD";  // Node drops the body for HEAD
 
-  if (req.method === "GET" && (parts.length === 0 || url.pathname === "/archive" || (parts[0] === "d" && parts.length === 2))) {
+  if (read && url.pathname === "/today") return json(res, 200, { number: semantle.todaysNumber() });
+
+  if (read && (parts.length === 0 || url.pathname === "/archive" || (parts[0] === "d" && parts.length === 2))) {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     return res.end(await readFile(PAGE));
   }
