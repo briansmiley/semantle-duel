@@ -61,6 +61,13 @@
   #archive { max-width: 640px; margin: 0 auto; padding: 22px 16px 60px; }
   #archive .back { font: 400 1.6rem/1 var(--serif); color: inherit; text-decoration: none; }
   #archive .back i { color: var(--hot); }
+  #archive .goto { display: flex; flex-wrap: wrap; gap: .4rem 1rem; align-items: baseline; margin-top: 1.4rem; }
+  #archive .goto input { width: 7em; font-size: 1.05rem; }
+  #archive .goto input::-webkit-inner-spin-button, #archive .goto input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  #archive .goto input { -moz-appearance: textfield; appearance: textfield; }
+  #archive .goto button { border-bottom: 2px solid var(--hot); padding-bottom: 1px; }
+  #archive .goto .why { flex-basis: 100%; color: var(--hot); font-style: italic; font-size: .95rem; }
+  #archive .goto .why:empty { display: none; }
   #archive h3 { font: 400 1.05rem var(--serif); color: var(--faint); margin: 2rem 0 .5rem; }
   #archive .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(4.6rem, 1fr)); gap: 2px 6px; }
   #archive .grid button { text-align: left; padding: .4rem .2rem; border-bottom: 1px solid var(--rule); display: grid; }
@@ -382,6 +389,7 @@
 <main id="archive" hidden>
   <a href="/" class="back">semantle <i>duel</i></a>
   <h3 class="for" hidden>pick a puzzle for the rematch</h3>
+  <form class="goto" novalidate><input class="line num" type="number" inputmode="numeric" min="1" step="1" placeholder="go to #" aria-label="puzzle number"><button>go</button><span class="why"></span></form>
   <div class="months"></div>
 </main>
 
@@ -1059,7 +1067,21 @@ async function archivePage() {
   const rematchOf = new URLSearchParams(location.search).get("rematch");
   const collabNext = new URLSearchParams(location.search).get("collab");  // as chosen on the rematch panel
   $("#archive .for").hidden = !rematchOf;
-  const { number: today } = await (await fetch("/today")).json();
+  const todayP = fetch("/today").then((r) => r.json()).then((j) => j.number);
+  // a rematch proposed: back to the finished round to wait for the others (or on into the rematch, should it already be made)
+  const open = (n, b) => rematchOf ? rematch(rematchOf, n, b, undefined, collabNext === null ? undefined : collabNext === "1").then((v) => v && (location.href = `/d/${rematchOf}`)) : newDuel(n, b);
+  // attached before /today answers, so an early submit waits for it rather than natively reloading the page
+  $("#archive .goto").onsubmit = async (e) => {
+    e.preventDefault();
+    const today = await todayP;
+    const n = Number($("#archive .goto input").value);
+    const ok = Number.isInteger(n) && n >= 1 && n <= today;
+    $("#archive .goto .why").textContent = ok ? "" : `pick a number from 1 to ${today}`;
+    if (ok) open(n, $("#archive .goto button"));
+  };
+  // back to a page restored from the back/forward cache: the go button was left disabled by the pick that left it
+  addEventListener("pageshow", (e) => { if (e.persisted) $("#archive .goto button").disabled = false; });
+  const today = await todayP;
   const played = new Set(pastDuels().map((d) => d.number));
   const dateOf = (n) => new Date(Date.UTC(2022, 0, 29 + n - 1));
   const months = new Map();
@@ -1070,8 +1092,7 @@ async function archivePage() {
     const b = el("button", { class: played.has(n) ? "played" : "", title: played.has(n) ? "played" : "" },
       el("b", { class: "num" }, `#${n}`),
       el("small", {}, d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })));
-    // a rematch proposed: back to the finished round to wait for the others (or on into the rematch, should it already be made)
-    b.onclick = () => (rematchOf ? rematch(rematchOf, n, b, undefined, collabNext === null ? undefined : collabNext === "1").then((v) => v && (location.href = `/d/${rematchOf}`)) : newDuel(n, b));
+    b.onclick = () => open(n, b);
     months.get(key).push(b);
   }
   $("#archive .months").replaceChildren(...[...months].flatMap(([m, bs]) => [el("h3", {}, m), el("div", { class: "grid" }, ...bs)]));
