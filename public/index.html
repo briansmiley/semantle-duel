@@ -89,7 +89,7 @@
   #pausebar { color: var(--faint); font-size: .95rem; margin-left: .5em; }
   #pausebar button { color: var(--ink); border-bottom: 1px solid currentColor; margin-left: .3em; }
   #pausebar .ask { color: var(--hot); }
-  #board.paused .side.me ol, #board.paused #guess { filter: blur(6px); pointer-events: none; }
+  #board.paused .side.me ol { filter: blur(6px); pointer-events: none; }
   .side form.slot { visibility: hidden; }
   .side form .submit { font-size: 1.05rem; border-bottom: 2px solid var(--hot); padding-bottom: 1px; }
   .side form .submit:disabled { color: var(--faint); border-color: var(--rule); cursor: default; }
@@ -1249,7 +1249,7 @@ function duelPage(id) {
     history.replaceState(null, "", `/d/${view.room}`);
     id = next; base = `/d/${id}`;
     view = currentView = null; drawn = null; greeted = false; stood = false;
-    seen = null; input.value = ""; pending = []; recall = null; flashRecall = false; note = null;
+    seen = null; input.value = ""; held = null; pending = []; recall = null; flashRecall = false; note = null;
     picking = false; nextCollab = null; openRival = null;
     editing = !store.get("sd-name"); showMine();
     chart = { open: false, x: "t", y: "best", hide: new Set(), picking: false };
@@ -1399,6 +1399,11 @@ function duelPage(id) {
     return v?.status === "playing" && v.players.some((p) => p.id === me) && input.isConnected && !input.disabled && !matchMedia("(hover: none)").matches;
   }
 
+  function pausedText(v) {
+    const by = v.paused?.by && v.players.find((p) => p.id === v.paused.by);
+    return !by ? "paused while away" : by.id === me ? "paused" : `${by.name} paused`;
+  }
+
   function pausebar(v, mine) {
     const bar = $("#pausebar");
     const racer = mine && !mine.finish && v.status === "playing";
@@ -1409,10 +1414,9 @@ function duelPage(id) {
       b.onclick = () => post(`${base}/pause`, { player: me, paused }).then((r) => r.view && apply(r.view));
       return b;
     };
-    const by = v.paused?.by && v.players.find((p) => p.id === v.paused.by);
     const quit = racer && v.collab ? [" · ", ...giveUpVote(v)] : [];  // (a round can be given up while paused, so the vote stays)
     const kids = !v.paused ? (racer ? ["·", toggle("pause", true), " · ", ...hint(v), ...quit] : [])
-      : [`· ${!by ? "paused while away" : by.id === me ? "paused" : `${by.name} paused`}`, racer ? toggle("resume", false) : "", ...quit];
+      : [`· ${pausedText(v)}`, racer ? toggle("resume", false) : "", ...quit];
     bar.replaceChildren(...kids);
   }
 
@@ -1702,6 +1706,7 @@ function duelPage(id) {
   // Your box to type in is made once and kept on the page, its side redrawn round it (see side): one built afresh
   // on every update would move the caret, lose a phone keyboard's word in progress, and undo a give-up's "sure?".
   const input = el("input", { class: "line", id: "guess", autocomplete: "off", autocapitalize: "off", spellcheck: "false", enterkeyhint: "go" });
+  let held = null;  // a word half typed when the round paused, out of the box so its placeholder says who paused
   const submit = el("button", { class: "submit", type: "submit" }, "guess");
   submit.onpointerdown = (e) => e.preventDefault();  // keep the keyboard up on phones
   const quit = el("button", { class: "giveup", type: "button" }, "give up");
@@ -1755,8 +1760,11 @@ function duelPage(id) {
 
     // racing: guess; finished: keep checking words, just for their scores
     if (mine && v.players.some((q) => q.id === me) && (v.status === "playing" || v.status === "over")) {
-      input.placeholder = f ? "check a word" : "type a guess";
-      input.disabled = submit.disabled = !!v.paused && !f;
+      const hold = !!v.paused && !f;
+      if (hold && input.value) { held = input.value; input.value = ""; }
+      else if (!hold && held != null) { if (!input.value) input.value = held; held = null; }
+      input.placeholder = f ? "check a word" : v.paused ? pausedText(v) : "type a guess";
+      input.disabled = submit.disabled = hold;
       submit.textContent = f ? "check" : "guess";
       quit.hidden = !!(f || v.collab);  // (co-op: giving up is a vote, up by the clock)
       div.append(form.isConnected ? spot : form);
