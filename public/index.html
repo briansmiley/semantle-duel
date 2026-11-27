@@ -1172,6 +1172,7 @@ function duelPage(id) {
   };
   $("#share").onclick = async () => {
     const link = `${location.origin}/d/${view?.room ?? id}`;  // the room's link, whichever round this is
+    if (navigator.share && matchMedia("(hover: none)").matches) return navigator.share({ url: link }).catch(() => {});  // phones: the share sheet beats pasting
     try { await navigator.clipboard.writeText(link); $("#share").textContent = "copied"; }
     catch { $("#share").textContent = link; }
     setTimeout(() => ($("#share").textContent = "copy link"), 1600);
