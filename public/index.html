@@ -554,7 +554,7 @@ function pastList(rooms) {
         el("span", { class: "num" }, `${n} ${n === 1 ? "round" : "rounds"}${wins ? ` · ${wins} won` : ""}`),
         el("span", { class: d.place === 1 ? "w" : "" },
           d.found === true ? `${d.place ? ordinal(d.place) : "found"} · ${d.secret}`
-          : d.found === false ? `gave up · ${d.secret}` : "in progress"),
+          : d.found === false ? `gave up${d.secret ? ` · ${d.secret}` : ""}` : "in progress"),
       ),
     );
   }));
@@ -1347,10 +1347,10 @@ function duelPage(id) {
       // itself in the box, and can't ready until it does). Mid-game, "sit in".
       const inIt = v.players.some((p) => p.id === me);
       const name = store.get("sd-name");  // (as it is now: it may have been given on this page, a round ago)
-      if (v.setter?.id !== me && (inIt ? name : v.status === "lobby" && v.players.length < v.max)) join(name ?? "");
+      if (!v.setter?.you && (inIt ? name : v.status === "lobby" && v.players.length < v.max)) join(name ?? "");
     }
     remember(v);
-    const setting = v.setter?.id === me;  // you set the word: you watch, seeing every word
+    const setting = !!v.setter?.you;  // you set the word: you watch, seeing every word
     // which word: Semantle's puzzle (linked), one somebody set, or a random draw, which says only that until
     // the word is out (then, if it was one of Semantle's, its number and link)
     const numbered = v.number && (v.mode !== "random" || v.secret);
@@ -1416,6 +1416,7 @@ function duelPage(id) {
       const finder = v.collab ? v.players.find((p) => p.guesses.some((g) => g.word === v.secret)) : mine;
       banner.replaceChildren(...(mine.finish.found
         ? [`${raced ? ordinal(standings(v).indexOf(mine) + 1) + ": " : ""}${finder?.id === me ? "you" : finder?.name ?? "the room"} found `, el("b", {}, v.secret), " in ", el("span", { class: "num" }, `${n}`), n === 1 ? " guess" : " guesses"]
+        : !v.secret ? ["you gave up. the word shows once everyone’s done"]  // given up without a guess
         : [v.collab ? "the room gave up. it was " : "you gave up. it was ", el("b", {}, v.secret)]));
     }
     after(v, mine);
@@ -1526,12 +1527,12 @@ function duelPage(id) {
   // voice chat, for the duel's players: join, then who's in (lit while talking), mute and leave
   function voiceBar(v) {
     const bar = $("#voice"), st = voice.state;
-    const inIt = v.players.some((p) => p.id === me) || v.setter?.id === me;  // the setter may talk too
+    const inIt = v.players.some((p) => p.id === me) || v.setter?.you;  // the setter may talk too
     bar.hidden = !inIt || !window.RTCPeerConnection || !navigator.mediaDevices;
     $("#mic").hidden = bar.hidden || st.status !== "on" || !st.tunable || !micOpen;
     if (bar.hidden) return;
     const members = v.voice ?? [];
-    const nameOf = (id) => (id === me ? "you" : v.players.find((p) => p.id === id)?.name ?? (v.setter?.id === id ? v.setter.name : "?"));
+    const nameOf = (id) => (id === me ? "you" : v.players.find((p) => p.id === id)?.name ?? v.setter?.name ?? "?");  // in voice and not playing: the setter
     const btn = (label, fn) => { const b = el("button", { type: "button" }, label); b.onclick = fn; return b; };
     const kids = [];
     if (st.status === "off") {
