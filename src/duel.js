@@ -12,7 +12,7 @@ const ABANDON_MS = 24 * 3600_000; // a started duel with no moves this long ends
 export const AWAY_MS = Number(process.env.AWAY_MS ?? 90_000);
 
 /** @typedef {{n:number, word:string, score:number, rank:number|null, at:number, hint?:boolean}} Guess  hint: given to everyone, agreed on */
-/** @typedef {{word:string, score:number, rank:number|null, at:number}} Check  a word scored after finishing; shown to whoever may see everything (finished, setter, round over), not to those still racing */
+/** @typedef {{word:string, score:number, rank:number|null, at:number}} Check  a word scored after finishing; shown to their owner, and to whoever may see everything (finished having played, setter, round over), not to those still racing */
 /** @typedef {{at:number, found:boolean}} Finish */
 /** @typedef {{from:number, to:number|null, by:string|null}} Pause  by: who pressed pause, or null when everyone left */
 /** @typedef {{by:string, puzzle?:number, mode?:string, collab:boolean, avoid?:string[], asks:string[]}} Rematch  proposed, not yet made; asks: who has said yes */
@@ -58,8 +58,9 @@ export class Duel {
     return !!p && !p.finish && this.status(now) === "playing";
   }
 
+  /** When they last showed signs of life: a hint handed to them doesn't count. */
   lastHeard(p) {
-    return Math.max(this.startsAt ?? 0, this.seen[p.id] ?? 0, p.guesses.at(-1)?.at ?? 0);
+    return Math.max(this.startsAt ?? 0, this.seen[p.id] ?? 0, p.guesses.findLast((g) => !g.hint)?.at ?? 0);
   }
 
   /** A player showed signs of life. Ends a pause that started because everyone had left. Returns true if it changed anything visible. */
@@ -125,6 +126,7 @@ export class Duel {
     const clean = String(name ?? "").trim().slice(0, 24) || "player";
     const p = this.players.get(playerId);
     if (p) return void (p.name = clean);
+    if (!/^[\da-f-]{1,64}$/i.test(playerId)) throw new DuelError("bad player id");  // the page makes UUIDs or hex, never a name like __proto__ (ids key `seen`)
     if (this.setter?.id === playerId) throw new DuelError("you set the word");
     if (this.status(now) === "over") throw new DuelError("it's over");
     if (this.players.size >= MAX_PLAYERS) throw new DuelError("full");
@@ -187,7 +189,7 @@ export class Duel {
     if (!p) return "not in this duel";
     if (this.status(now) !== "playing" || p.finish) return "not playing";
     if (this.pause()) return "paused";
-    if (!/^[a-z][a-z'-]*$/.test(word)) return "not a word";
+    if (!/^[a-z][a-z'-]{0,29}$/.test(word)) return "not a word";
     if (this.taken(p).some((g) => g.word === word)) return "already guessed";
     return null;
   }
@@ -196,7 +198,7 @@ export class Duel {
   checkRefusal(playerId, word) {
     const p = this.players.get(playerId);
     if (!p?.finish) return "not finished";
-    if (!/^[a-z][a-z'-]*$/.test(word)) return "not a word";
+    if (!/^[a-z][a-z'-]{0,29}$/.test(word)) return "not a word";
     if (this.taken(p).some((g) => g.word === word) || p.checks?.some((c) => c.word === word)) return "already guessed";
     return null;
   }
@@ -222,20 +224,20 @@ export class Duel {
     return [next, racing.size > 0 && [...racing].every((id) => next.includes(id))];
   }
 
-  /** Ask for a hint (or stop asking). Returns true once everyone still racing has asked. */
-  askHint(playerId, want, now) {
+  /** Ask for a hint (or stop asking). Returns true once everyone still racing (or of `voters`) has asked. */
+  askHint(playerId, want, now, voters) {
     if (!this.racing(playerId, now)) throw new DuelError("not playing");
     if (this.pause()) throw new DuelError("paused");
-    const [asks, all] = this.vote(this.hintAsks, playerId, want, now);
+    const [asks, all] = this.vote(this.hintAsks, playerId, want, now, voters);
     this.hintAsks = asks;
     return all;
   }
 
-  /** Co-op: ask to give up (or stop asking). Once everyone still racing has asked, the round ends for all. */
-  askGiveUp(playerId, want, now) {
+  /** Co-op: ask to give up (or stop asking). Once everyone still racing (or of `voters`) has asked, the round ends for all. */
+  askGiveUp(playerId, want, now, voters) {
     if (!this.collab) throw new DuelError("not a co-op round");
     if (!this.racing(playerId, now)) throw new DuelError("not playing");
-    const [asks, all] = this.vote(this.giveUpAsks, playerId, want, now);
+    const [asks, all] = this.vote(this.giveUpAsks, playerId, want, now, voters);
     this.giveUpAsks = asks;
     if (all) this.finishAll(false, now);
   }
@@ -308,19 +310,21 @@ export class Duel {
     if (open && [...this.players.values()].every((q) => q.finish)) open.to = now;
   }
 
-  /** What one viewer may see: everything once they've finished (or it's over), otherwise only scores of others. */
+  /** What one viewer may see: everything once they've finished having played (or it's over), otherwise only scores of others. */
   viewFor(viewerId, now) {
     const status = this.status(now);
-    const reveal = status === "over" || !!this.players.get(viewerId)?.finish || this.setter?.id === viewerId;
+    const viewer = this.players.get(viewerId);
+    // giving up straight after joining isn't a way to read the word: a give-up counts once you've guessed
+    const reveal = status === "over" || this.setter?.id === viewerId || (!!viewer?.finish && (viewer.finish.found || viewer.guesses.some((g) => !g.hint)));
     const ended = status === "over" ? this.endedAt() : now;
     const open = this.pause();
-    const mine = new Set(this.players.get(viewerId)?.guesses.map((g) => g.word));
+    const mine = new Set(viewer?.guesses.map((g) => g.word));
     return {
       id: this.id,
       number: this.puzzle.number,
       mode: this.puzzle.mode ?? "semantle",
       collab: this.collab,
-      setter: this.setter,
+      setter: this.setter && { name: this.setter.name, you: this.setter.id === viewerId },  // never their id: it would open their view
       status,
       now,
       startsAt: this.startsAt,
@@ -352,7 +356,7 @@ export class Duel {
           // someone else found their own way to this word too (scores give that away anyway)
           shared: !g.hint && [...this.players.values()].some((q) => q !== p && q.guesses.some((h) => h.word === g.word && !h.hint)),
         })),
-        checks: reveal ? p.checks ?? [] : [],  // only the finished have any, and they see everything
+        checks: reveal || p.id === viewerId ? p.checks ?? [] : [],  // only the finished have any: your own, and everyone's once you see everything
       })),
     };
   }
@@ -396,7 +400,7 @@ export class Duel {
  *   h2h is keyed "a|b" with a < b: [a's wins, b's wins]
  */
 export function tally(rounds, now) {
-  const players = {}, h2h = {}, past = [];
+  const players = Object.create(null), h2h = Object.create(null), past = [];  // keyed by player ids, so "__proto__" is just a key
   let n = 0, together = 0;
   for (const [i, d] of rounds.entries()) {
     if (d.status(now) !== "over") continue;  // (so a round still running never gives its word to `past`)
