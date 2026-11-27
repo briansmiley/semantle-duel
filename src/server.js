@@ -306,6 +306,8 @@ async function handle(req, res) {
       : null;  // only a yes (or no) to what's proposed
     const agreed = duel.askRematch(player, msg.want !== false, pick, now);
     if (agreed) {
+      // a rematch is a new duel too: the same limit (a retry once it lifts still finds everyone's yes)
+      if (!room.rematch && !allowNewDuel(addressOf(req))) return json(res, 429, { error: "that's a lot of new duels; try again in a minute" });
       room.rematch ??= createDuel(agreed.puzzle, duel.room, { mode: agreed.mode, collab: agreed.collab, avoid: [...(agreed.avoid ?? []), duel.puzzle.secret] }).then((id) => { duel.next = id; duel.rematch = null; }).finally(() => (room.rematch = null));
       await room.rematch;
     }
