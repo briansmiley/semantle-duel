@@ -1060,18 +1060,23 @@ async function archivePage() {
   const rematchOf = new URLSearchParams(location.search).get("rematch");
   const collabNext = new URLSearchParams(location.search).get("collab");  // as chosen on the rematch panel
   $("#archive .for").hidden = !rematchOf;
-  const { number: today } = await (await fetch("/today")).json();
-  const played = new Set(pastDuels().map((d) => d.number));
-  const dateOf = (n) => new Date(Date.UTC(2022, 0, 29 + n - 1));
+  const todayP = fetch("/today").then((r) => r.json()).then((j) => j.number);
   // a rematch proposed: back to the finished round to wait for the others (or on into the rematch, should it already be made)
   const open = (n, b) => rematchOf ? rematch(rematchOf, n, b, undefined, collabNext === null ? undefined : collabNext === "1").then((v) => v && (location.href = `/d/${rematchOf}`)) : newDuel(n, b);
-  $("#archive .goto").onsubmit = (e) => {
+  // attached before /today answers, so an early submit waits for it rather than natively reloading the page
+  $("#archive .goto").onsubmit = async (e) => {
     e.preventDefault();
+    const today = await todayP;
     const n = Number($("#archive .goto input").value);
     const ok = Number.isInteger(n) && n >= 1 && n <= today;
     $("#archive .goto .why").textContent = ok ? "" : `pick a number from 1 to ${today}`;
     if (ok) open(n, $("#archive .goto button"));
   };
+  // back to a page restored from the back/forward cache: the go button was left disabled by the pick that left it
+  addEventListener("pageshow", (e) => { if (e.persisted) $("#archive .goto button").disabled = false; });
+  const today = await todayP;
+  const played = new Set(pastDuels().map((d) => d.number));
+  const dateOf = (n) => new Date(Date.UTC(2022, 0, 29 + n - 1));
   const months = new Map();
   for (let n = today; n >= 1; n--) {
     const d = dateOf(n);
