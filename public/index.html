@@ -444,6 +444,7 @@ async function post(url, data) {
 let oopsHide = null;
 function oops(error) {
   const o = $("#oops");
+  if (!$("#away").hidden) return;  // "server updating…" already says why, in the same spot
   o.textContent = error ?? "try again";
   o.hidden = false;
   clearTimeout(oopsHide);
@@ -1183,7 +1184,7 @@ function duelPage(id) {
     heard = Date.now();
     es = new EventSource(`${base}/events?player=${encodeURIComponent(me)}`);
     es.onopen = () => { clearTimeout(away); away = null; if (!$("#away").hidden) location.reload(); };  // after a real outage: reload for the deploy's new client code (voice carries over via pagehide)
-    es.onerror = () => { if (view && !away) away = setTimeout(() => ($("#away").hidden = false), 2_000); };
+    es.onerror = () => { if (view && !away) away = setTimeout(() => { $("#away").hidden = false; $("#oops").hidden = true; }, 2_000); };
     es.onmessage = (e) => { heard = Date.now(); apply(JSON.parse(e.data)); };
     es.addEventListener("ping", () => (heard = Date.now()));
     es.addEventListener("signal", (e) => { heard = Date.now(); const m = JSON.parse(e.data); voice.onSignal(m.from, m.data); });
