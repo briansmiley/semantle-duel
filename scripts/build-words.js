@@ -39,13 +39,20 @@ const today = semantle.todaysNumber();
 const archive = await cached(`archive-${today}`, async () => {
   const numbers = Array.from({ length: today }, (_, i) => i + 1);
   const got = {};
+  let missing = 0;
   await pool(numbers, 3, async (n) => {
     for (let tries = 0; tries < 3; tries++) {
       try { const p = await semantle.fetchPuzzle(n); got[p.secret] = n; return; }
-      catch { await new Promise((r) => setTimeout(r, 1000)); }
+      catch (e) {
+        // Some numbers never existed (#256, #263, ...): skip those, but not today's.
+        if (e.notFound && n !== today) { console.warn(`archive: #${n} doesn't exist, skipped`); return; }
+        await new Promise((r) => setTimeout(r, 1000));
+      }
     }
     console.warn(`archive: no #${n}`);
+    missing++;
   });
+  if (missing) throw new Error(`archive: ${missing} puzzles failed to download; nothing cached, rerun`);  // don't cache a partial archive
   return got;
 });
 console.log(`archive: ${Object.keys(archive).length} answers`);
