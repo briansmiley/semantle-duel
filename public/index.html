@@ -79,6 +79,7 @@
 
   /* duel */
   #duel { max-width: 980px; margin: 0 auto; padding: 18px 16px 60px; }
+  #duel > a { color: inherit; }
   header { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
   header .no { color: var(--faint); text-decoration: none; border-bottom: 1px dotted var(--faint); }
   header .no:hover { color: var(--ink); }
@@ -1081,9 +1082,15 @@ async function archivePage() {
 // and stays on it once its rematch is made, with a link on to it. (pinned is set up top: the pages open before here)
 async function openDuel(code) {
   let id = code;
-  if (!pinned) {
-    try { id = (await (await fetch(`/d/${code}/head?player=${encodeURIComponent(me)}`)).json()).id ?? code; } catch {}
-  }
+  try {
+    const r = await fetch(`/d/${code}/head?player=${encodeURIComponent(me)}`);
+    if (r.status === 404) {  // mistyped, or gone from the volume
+      $("#duel").replaceChildren(el("p", {}, "no such duel. it may have expired."), el("a", { href: "/" }, "home"));
+      $("#duel").hidden = false;
+      return;
+    }
+    if (!pinned) id = (await r.json()).id ?? code;
+  } catch {}
   duelPage(id);
 }
 
