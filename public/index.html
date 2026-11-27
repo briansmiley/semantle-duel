@@ -51,8 +51,6 @@
   #setword { display: flex; flex-wrap: wrap; gap: .6rem 1rem; align-items: baseline; justify-content: center; }
   #setword input { width: 11em; font-size: 1.15rem; text-align: center; }
   #setword button { white-space: nowrap; font-size: 1.15rem; border-bottom: 2px solid var(--hot); padding-bottom: 1px; }
-  #setword .why { flex-basis: 100%; text-align: center; color: var(--hot); font-style: italic; font-size: .95rem; }
-  #setword .why:empty { display: none; }
   #home nav button { font-size: 1.15rem; border-bottom: 1.5px solid currentColor; padding-bottom: 2px; }
   #home nav button, #home nav a { font-size: 1.15rem; border-bottom: 1.5px solid currentColor; padding-bottom: 2px; color: inherit; text-decoration: none; }
   #home nav .quiet { color: var(--faint); }
@@ -277,7 +275,8 @@
   li .w:has(small) .t { flex: 0 1 auto; }
   li .w:has(small) small { flex: 1 1 0; min-width: .8em; display: inline-flex; flex-wrap: wrap; max-height: 1.3em; overflow: hidden; }
   /* the live stream is down (a deploy restarting the server, or the network): says so until it's back */
-  #away { position: fixed; z-index: 40; top: calc(env(safe-area-inset-top) + 2.9rem); left: 50%; translate: -50% 0; width: max-content; max-width: calc(100vw - 2rem); white-space: nowrap; margin: 0; padding: .25em .8em; background: var(--paper); color: var(--faint); border: 1px solid var(--rule); border-radius: 4px; box-shadow: 0 6px 24px rgb(0 0 0 / .14); font-size: .95rem; font-style: italic; text-align: center; }
+  #away, #oops { position: fixed; z-index: 40; top: calc(env(safe-area-inset-top) + 2.9rem); left: 50%; translate: -50% 0; width: max-content; max-width: calc(100vw - 2rem); white-space: nowrap; margin: 0; padding: .25em .8em; background: var(--paper); color: var(--faint); border: 1px solid var(--rule); border-radius: 4px; box-shadow: 0 6px 24px rgb(0 0 0 / .14); font-size: .95rem; font-style: italic; text-align: center; }
+  #oops { color: var(--hot); }
   #cut { position: fixed; z-index: 30; max-width: 90vw; padding: .25em .6em; background: var(--ink); color: var(--paper); border-radius: 4px; font-size: .9rem; pointer-events: none; }
   li .w.hidden, .chip .w.hidden { filter: blur(5px); user-select: none; color: var(--faint); }
   li .s { text-align: right; }
@@ -374,6 +373,7 @@
 <body>
 
 <div id="top"><a href="/" class="logo" title="home" hidden>semantle <i>duel</i></a><button type="button" id="bug">feedback</button></div>
+<p id="oops" role="alert" hidden></p>
 
 <main id="home" hidden>
   <h1><span class="lead">semantle</span> <span class="roll"><span><i>duel</i></span></span></h1>
@@ -383,7 +383,7 @@
     <button data-puzzle="set" class="quiet" title="you pick the word and watch">custom</button>
     <a href="/archive" class="quiet">archive</a>
   </nav>
-  <form id="setword" hidden><input class="line" placeholder="the secret word" maxlength="30" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"><button>make the duel</button><span class="why"></span></form>
+  <form id="setword" hidden><input class="line" placeholder="the secret word" maxlength="30" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"><button>make the duel</button></form>
 </main>
 
 <main id="archive" hidden>
@@ -453,6 +453,17 @@ async function post(url, data) {
   } catch {
     return { ok: false, error: "didn’t reach the server" };
   }
+}
+
+// Why a tap didn't take, for a few seconds, up top.
+let oopsHide = null;
+function oops(error) {
+  const o = $("#oops");
+  if (!$("#away").hidden) return;  // "server updating…" already says why, in the same spot
+  o.textContent = error ?? "try again";
+  o.hidden = false;
+  clearTimeout(oopsHide);
+  oopsHide = setTimeout(() => (o.hidden = true), 3_000);
 }
 
 /* ---------- past duels (this browser only) ---------- */
@@ -574,15 +585,15 @@ const VOICE_INTO = "sd-voice-into";  // sessionStorage: "<duel id>|<when>": this
 async function rematch(id, puzzle, button, mode, collab) {
   button.disabled = true;
   const r = await post(`/d/${id}/rematch`, { player: me, puzzle, mode, collab, avoid: mode === "random" ? playedWords() : undefined });
-  if (!r.view) button.disabled = false;
+  if (!r.view) { button.disabled = false; oops(r.error); }
   return r.view;
 }
 
 async function newDuel(puzzle, button, extra = {}) {
   button.disabled = true;
   const r = await post("/duels", { puzzle, ...extra });
-  if (r.id) location.href = `/d/${r.id}`; else button.disabled = false;
-  return r;
+  if (r.id) location.href = `/d/${r.id}`;
+  else { button.disabled = false; oops(r.error); }
 }
 
 /* ---------- title ---------- */
@@ -1046,13 +1057,10 @@ else {
     else b.onclick = () => newDuel(undefined, b);
   }
   // set a word: you make the duel and watch it, seeing every word
-  $("#setword").onsubmit = async (e) => {
+  $("#setword").onsubmit = (e) => {
     e.preventDefault();
     const word = $("#setword input").value.trim();
-    if (!word) return;
-    $("#setword .why").textContent = "";
-    const r = await newDuel(undefined, $("#setword button"), { word, player: me, name: store.get("sd-name") ?? "" });
-    if (!r.id) $("#setword .why").textContent = r.error ?? "try again";
+    if (word) newDuel(undefined, $("#setword button"), { word, player: me, name: store.get("sd-name") ?? "" });
   };
 }
 
@@ -1081,7 +1089,9 @@ async function archivePage() {
   };
   // back to a page restored from the back/forward cache: the go button was left disabled by the pick that left it
   addEventListener("pageshow", (e) => { if (e.persisted) $("#archive .goto button").disabled = false; });
-  const today = await todayP;
+  let today;
+  try { today = await todayP; }
+  catch { $("#archive .months").textContent = "couldn’t load the archive: reload to try again"; return; }
   const played = new Set(pastDuels().map((d) => d.number));
   const dateOf = (n) => new Date(Date.UTC(2022, 0, 29 + n - 1));
   const months = new Map();
@@ -1129,6 +1139,7 @@ function duelPage(id) {
   fetch("/today").then((r) => r.json()).then((t) => { today = t.number; if (view) render(); }).catch(() => {});
 
   const join = (name) => post(`${base}/join`, { player: me, name });
+  const act = (r) => (r.view ? apply(r.view) : oops(r.error));  // a tap's reply: its view, or why it didn't take
   const savedName = store.get("sd-name");
   // Sat down on the first view: in the lobby, or to refresh your name if you're already in. Mid-game you start out watching.
   let greeted = false;
@@ -1140,8 +1151,7 @@ function duelPage(id) {
     if (!name) return $("#latename").focus();
     store.set("sd-name", name);
     $("#name").value = name;
-    const r = await join(name);
-    if (r.view) apply(r.view);
+    act(await join(name));
   };
   // your name in the lobby list is its own input: shown, with a pencil, or being edited
   let editing = !savedName;
@@ -1158,7 +1168,7 @@ function duelPage(id) {
     e.preventDefault();
     const name = $("#name").value.trim();
     if (!name) { const was = store.get("sd-name"); if (!was) return; $("#name").value = was; }
-    else { store.set("sd-name", name); if (inNow() ? name !== view.players.find((p) => p.id === me).name : !blurred || !stood) join(name).then((r) => r.view && apply(r.view)); }
+    else { store.set("sd-name", name); if (inNow() ? name !== view.players.find((p) => p.id === me).name : !blurred || !stood) join(name).then(act); }
     editing = false; showMine();
     if (view) render();
   };
@@ -1169,7 +1179,7 @@ function duelPage(id) {
     if (!name) { editing = true; showMine(); return $("#name").focus(); }
     store.set("sd-name", name);
     editing = false; showMine();
-    join(name).then((r) => r.view && apply(r.view));
+    join(name).then(act);
   };
   // Tapping these mustn't blur the name box: its submit swaps the box out and the button moves from under the finger.
   $("#mine .joinbtn").onpointerdown = $("#mine .standbtn").onpointerdown = (e) => e.preventDefault();
@@ -1182,7 +1192,7 @@ function duelPage(id) {
     if (typed) store.set("sd-name", typed);
     editing = !(typed || store.get("sd-name")); showMine();  // with no name yet, the box stays open
     post(`${base}/leave`, { player: me }).then((r) => {
-      if (!r.view) return;
+      if (!r.view) return oops(r.error);
       if (!r.view.players.some((p) => p.id === me)) voice.leave();  // (not if the round began first: then you're still in it)
       apply(r.view);
     });
@@ -1197,7 +1207,7 @@ function duelPage(id) {
   };
   $("#go").onclick = () => {
     const mine = view?.players.find((p) => p.id === me);
-    if (mine) post(`${base}/ready`, { player: me, ready: !mine.ready }).then((r) => r.view && apply(r.view));
+    if (mine) post(`${base}/ready`, { player: me, ready: !mine.ready }).then(act);
   };
   $("#share").onclick = async () => {
     const link = `${location.origin}/d/${view?.room ?? id}`;  // the room's link, whichever round this is
@@ -1217,7 +1227,7 @@ function duelPage(id) {
     heard = started = Date.now();
     es = new EventSource(`${base}/events?player=${encodeURIComponent(me)}`);
     es.onopen = () => { clearTimeout(away); away = null; if (!$("#away").hidden) location.reload(); };  // after a real outage: reload for the deploy's new client code (voice carries over via pagehide)
-    es.onerror = () => { if (view && !away) away = setTimeout(() => ($("#away").hidden = false), 2_000); };
+    es.onerror = () => { if (view && !away) away = setTimeout(() => { $("#away").hidden = false; $("#oops").hidden = true; }, 2_000); };
     es.onmessage = (e) => { heard = Date.now(); apply(JSON.parse(e.data)); };
     es.addEventListener("ping", () => (heard = Date.now()));
     es.addEventListener("signal", (e) => { heard = Date.now(); const m = JSON.parse(e.data); voice.onSignal(m.from, m.data); });
@@ -1354,7 +1364,7 @@ function duelPage(id) {
       const others = v.players.filter((p) => p.id !== me).map((p) => el("span", { class: away(p) ? "away" : "" }, el("span", {}, p.name), tick(p), away(p) ? el("small", {}, " away") : ""));
       if (v.players.length + (mine ? 0 : 1) < v.max) others.push(el("span", { class: "empty" }, "…"));
       $("#lobby .who .others").replaceChildren(...others);
-      $("#lobby .mode").replaceChildren(modeToggle(v.collab, mine && ((collab) => post(`${base}/collab`, { player: me, collab }).then((r) => r.view && apply(r.view)))));
+      $("#lobby .mode").replaceChildren(modeToggle(v.collab, mine && ((collab) => post(`${base}/collab`, { player: me, collab }).then(act))));
       // everyone says ready, then the countdown starts by itself
       const go = $("#go");
       go.disabled = !mine || !store.get("sd-name");  // seated before you've named yourself: name first, then ready
@@ -1454,7 +1464,7 @@ function duelPage(id) {
     $("#board").classList.toggle("paused", !!(v.paused && racer));
     const toggle = (label, paused) => {
       const b = el("button", { type: "button" }, label);
-      b.onclick = () => post(`${base}/pause`, { player: me, paused }).then((r) => r.view && apply(r.view));
+      b.onclick = () => post(`${base}/pause`, { player: me, paused }).then(act);
       return b;
     };
     const quit = racer && v.collab ? [" · ", ...giveUpVote(v)] : [];  // (a round can be given up while paused, so the vote stays)
@@ -1756,7 +1766,7 @@ function duelPage(id) {
   let unsure;  // the "sure?" lapsing: one at a time, the box (and so this button) being kept
   const calm = () => { clearTimeout(unsure); delete quit.dataset.sure; quit.textContent = "give up"; };
   quit.onclick = () => {
-    if (quit.dataset.sure) { calm(); return post(`${base}/giveup`, { player: me }).then((r) => r.view && apply(r.view)); }
+    if (quit.dataset.sure) { calm(); return post(`${base}/giveup`, { player: me }).then(act); }
     clearTimeout(unsure);
     quit.dataset.sure = 1; quit.textContent = "sure?";
     unsure = setTimeout(calm, 2500);
