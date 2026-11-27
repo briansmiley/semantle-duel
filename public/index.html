@@ -1339,6 +1339,8 @@ function duelPage(id) {
     board.classList.toggle("crowd", sides.length > 2);
     board.classList.toggle("mine", inIt);
     const fresh = !input.isConnected || input.disabled;
+    // focus on something in your side that's redrawn (a sort header you just clicked): back to the box, or it's lost
+    const within = !!form.parentNode?.contains(document.activeElement) && !form.contains(document.activeElement);
     // a crowd: the first (you) on the left, everyone else stacked beside
     // snapshot first: with the form up, side() redraws your own side in place, so rowsAt() after it sees the new rows
     const before = rowsAt();
@@ -1379,7 +1381,7 @@ function duelPage(id) {
     seen = new Set(v.players.flatMap((p) => [...p.guesses.map((g) => `${p.id}:${g.n}`), ...(p.checks ?? []).map((c, k) => `${p.id}:c${k}`)]));
     flashRecall = false;
     // the box is focused as it comes up to type in, not on every redraw (which would pull you back from anything else), never scrolling you up to it
-    if (fresh && v.status === "playing" && inIt && !matchMedia("(hover: none)").matches) input.focus({ preventScroll: true });
+    if ((fresh || within) && v.status === "playing" && inIt && !matchMedia("(hover: none)").matches) input.focus({ preventScroll: true });
   }
 
   function pausebar(v, mine) {
@@ -1688,10 +1690,13 @@ function duelPage(id) {
   const submit = el("button", { class: "submit", type: "submit" }, "guess");
   submit.onpointerdown = (e) => e.preventDefault();  // keep the keyboard up on phones
   const quit = el("button", { class: "giveup", type: "button" }, "give up");
+  let unsure;  // the "sure?" lapsing: one at a time, the box (and so this button) being kept
+  const calm = () => { clearTimeout(unsure); delete quit.dataset.sure; quit.textContent = "give up"; };
   quit.onclick = () => {
-    if (quit.dataset.sure) return post(`${base}/giveup`, { player: me }).then((r) => r.view && apply(r.view));
+    if (quit.dataset.sure) { calm(); return post(`${base}/giveup`, { player: me }).then((r) => r.view && apply(r.view)); }
+    clearTimeout(unsure);
     quit.dataset.sure = 1; quit.textContent = "sure?";
-    setTimeout(() => { delete quit.dataset.sure; quit.textContent = "give up"; }, 2500);
+    unsure = setTimeout(calm, 2500);
   };
   const form = el("form", {}, input, submit, quit), spot = new Comment();  // spot: where the box goes in a side redrawn
   form.onsubmit = async (e) => {
