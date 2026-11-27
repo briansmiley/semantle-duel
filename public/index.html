@@ -164,6 +164,7 @@
   @media (max-width: 700px) {
     /* minmax(0, …): a bare 1fr would grow to its widest row and run off the screen */
     #board, #board.crowd { grid-template-columns: minmax(0, 1fr); gap: 2rem; margin-top: 1.2rem; }
+    /* render() doesn't build these sides at all (its matchMedia is this same query, and .mine is its inIt): change the two together */
     #board.mine .side:not(.me), #board.mine .others { display: none; }
     /* narrower columns, so the word itself has room */
     #duel li { grid-template-columns: 1.6em minmax(0, 1fr) 3em 6.6em; gap: .5em; }
