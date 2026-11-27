@@ -1508,7 +1508,8 @@ function duelPage(id) {
   // In co-op, so is giving up: it ends the round for the room.
   const giveUpVote = (v) => vote(v, v.giveUpAsks ?? [], { action: "askgiveup", label: "give up", asking: "asked to give up", wants: "to give up" });
 
-  function vote(v, asks, { action, label, asking, wants, voters = v.players.filter((p) => !p.finish) }) {
+  // It waits only for those the server counts (still racing, heard from lately): one who left doesn't hold it up.
+  function vote(v, asks, { action, label, asking, wants, voters = v.players.filter((p) => !p.finish && (!v.voters || v.voters.includes(p.id))) }) {
     const ask = (want, text) => {
       const b = el("button", { type: "button" }, text);
       b.onclick = () => post(`${base}/${action}`, { player: me, want }).then((r) => { if (r.view) apply(r.view); if (!r.ok && r.error) { notes = [{ word: label, msg: r.error }]; render(); } });
