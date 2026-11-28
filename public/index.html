@@ -1093,11 +1093,16 @@ async function archivePage() {
   // attached before /today answers, so an early submit waits for it rather than natively reloading the page
   $("#archive .goto").onsubmit = async (e) => {
     e.preventDefault();
-    const today = await todayP;
+    const b = $("#archive .goto button"), why = $("#archive .goto .why");
+    if (b.disabled) return;  // a submit is already waiting on /today, or the duel is starting
+    b.disabled = true;
+    let today;
+    try { today = await todayP; }
+    catch { why.textContent = "couldn’t load the archive, try again"; b.disabled = false; return; }
     const n = Number($("#archive .goto input").value);
     const ok = Number.isInteger(n) && n >= 1 && n <= today;
-    $("#archive .goto .why").textContent = ok ? "" : `pick a number from 1 to ${today}`;
-    if (ok) open(n, $("#archive .goto button"));
+    why.textContent = ok ? "" : `pick a number from 1 to ${today}`;
+    if (ok) open(n, b); else b.disabled = false;
   };
   // back to a page restored from the back/forward cache: the go button was left disabled by the pick that left it
   addEventListener("pageshow", (e) => { if (e.persisted) $("#archive .goto button").disabled = false; });
