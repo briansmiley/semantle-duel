@@ -214,9 +214,9 @@ const clean = (word) => String(word ?? "").replace(/[‘’ʼ]/g, "'").trim().to
 /**
  * A new duel on Semantle's puzzle `which` (today's if not given), or with `mode: "random"` a word drawn from
  * our list (not one in `avoid`), or with `word` one that `setter` chose (they watch; Semantle must know it).
- * `collab`: the round is played as a room, whichever word it is.
+ * `collab`: the round is played as a room, whichever word it is. `host`: the player id of whoever made it.
  */
-async function createDuel(which, room = null, { mode, word, setter, avoid, collab } = {}) {
+async function createDuel(which, room = null, { mode, word, setter, avoid, collab, host } = {}) {
   const today = semantle.todaysNumber();
   let pick;
   if (word !== undefined) {
@@ -237,6 +237,7 @@ async function createDuel(which, room = null, { mode, word, setter, avoid, colla
   const duel = new Duel(id, pick, Date.now());
   if (room) duel.room = room;
   duel.collab = !!collab;
+  duel.host = String(host ?? "") || null;
   if (pick.mode === "set") duel.setter = { id: String(setter?.id ?? ""), name: String(setter?.name ?? "").trim().slice(0, 24) || "someone" };
   rooms.set(id, { duel, listeners: new Set(), scores: new Map(), voice: new Map() });
   ranked(duel.puzzle.secret).catch(() => {});  // warm: for scoring, and the chart's lines once it's over
@@ -269,7 +270,7 @@ async function handle(req, res) {
   if (req.method === "POST" && url.pathname === "/duels") {
     if (!allowNewDuel(addressOf(req))) return json(res, 429, { error: "that's a lot of new duels; try again in a minute" });
     const { puzzle: which, mode, word, player, name, avoid } = await body(req, 16_384);
-    return json(res, 200, { id: await createDuel(which, null, { mode, word, avoid, setter: { id: player, name } }) });
+    return json(res, 200, { id: await createDuel(which, null, { mode, word, avoid, setter: { id: player, name }, host: player }) });
   }
 
   if (parts[0] !== "d" || parts.length !== 3) return json(res, 404, { error: "not found" });
@@ -377,9 +378,17 @@ async function handle(req, res) {
       : null;  // only a yes (or no) to what's proposed
     const agreed = duel.askRematch(player, msg.want !== false, pick, now);
     if (agreed) {
-      // a rematch is a new duel too: the same limit (a retry once it lifts still finds everyone's yes)
-      if (!room.rematch && !allowNewDuel(addressOf(req))) return json(res, 429, { error: "that's a lot of new duels; try again in a minute" });
-      room.rematch ??= createDuel(agreed.puzzle, duel.room, { mode: agreed.mode, collab: agreed.collab, avoid: [...(agreed.avoid ?? []), duel.puzzle.secret] }).then((id) => { duel.next = id; duel.rematch = null; }).finally(() => (room.rematch = null));
+      // a rematch is a new duel too: the same limit. Refused, the last yes is taken back, so nobody sees all yeses with
+      // nothing happening; their retry once it lifts still finds everyone else's.
+      if (!room.rematch && !allowNewDuel(addressOf(req))) {
+        duel.askRematch(player, false, null, now);
+        return json(res, 429, { error: "that's a lot of new duels; try again in a minute" });
+      }
+      // host: the room's original maker, not whoever proposed the rematch. If making it fails (Semantle down), the
+      // last yes is taken back for the same reason as above.
+      room.rematch ??= createDuel(agreed.puzzle, duel.room, { mode: agreed.mode, collab: agreed.collab, host: duel.host, avoid: [...(agreed.avoid ?? []), duel.puzzle.secret] })
+        .then((id) => { duel.next = id; duel.rematch = null; }, (e) => { duel.askRematch(player, false, null, now); broadcast(room); throw e; })
+        .finally(() => (room.rematch = null));
       await room.rematch;
     }
   } else if (action === "hint") {

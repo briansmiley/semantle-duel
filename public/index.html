@@ -600,7 +600,7 @@ async function rematch(id, puzzle, button, mode, collab) {
 
 async function newDuel(puzzle, button, extra = {}) {
   button.disabled = true;
-  const r = await post("/duels", { puzzle, ...extra });
+  const r = await post("/duels", { puzzle, player: me, ...extra });  // who made it: the invite line names them
   if (r.id) location.href = `/d/${r.id}`;
   else { button.disabled = false; oops(r.error); }
 }
@@ -1072,7 +1072,7 @@ else {
     const word = $("#setword [name=word]").value.trim(), name = $("#setword [name=name]").value.trim();
     if (!word) return;
     if (name) store.set("sd-name", name);
-    newDuel(undefined, $("#setword button"), { word, player: me, name });
+    newDuel(undefined, $("#setword button"), { word, name });
   };
 }
 
@@ -1397,9 +1397,8 @@ function duelPage(id) {
       go.textContent = mine?.ready ? "unready" : "ready";
       const unready = v.players.filter((p) => !p.ready && p.id !== me).map((p) => p.name);
       // who asked you here and to what, until you've named yourself; and what a setter does
-      // (the first seated, who made it, unless that's you; "player" is an unnamed seat, not a name to show)
-      const first = v.players[0];
-      const host = v.setter ?? (first && first.id !== me && first.name !== "player" ? first : null);
+      // (who made it, while they're seated and aren't you; "player" is an unnamed seat, not a name to show)
+      const host = v.setter ?? (v.host && !v.host.you && v.host.name !== "player" ? v.host : null);
       const what = v.mode === "random" ? "a random word" : v.mode === "set" ? "their word"
         : v.number === today ? "today’s Semantle word" : `Semantle #${v.number}`;
       const intro = setting ? "send the link; you’ll watch every guess."
