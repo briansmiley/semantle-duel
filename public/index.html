@@ -446,14 +446,17 @@ const store = {
 };
 // History from before the 2026-11-21 clear-out points at rounds that no longer exist: forget it.
 try { localStorage.removeItem("sd-duels"); localStorage.removeItem("sd-made"); } catch {}
-const me = store.get("sd-player") || (() => { const id = crypto.randomUUID?.() ?? [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join(""); store.set("sd-player", id); return id; })();
+const hex = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
+const kept = (k, make) => store.get(k) || (() => { const v = make(); store.set(k, v); return v; })();
+const me = kept("sd-player", () => crypto.randomUUID?.() ?? hex());
+const myKey = kept("sd-key", hex);  // private, unlike `me`: what lets the server know a request is really from us
 const path = location.pathname.split("/").filter(Boolean);
 const pinned = new URLSearchParams(location.search).has("round");  // a duel page opened with ?round: just that round
 
 // Never throws: a dropped or stalled request comes back as { ok: false } after 15s at most.
 async function post(url, data) {
   try {
-    const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(data), signal: AbortSignal.timeout(15_000) });
+    const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json", "x-player-key": myKey }, body: JSON.stringify(data), signal: AbortSignal.timeout(15_000) });
     return { ok: res.ok, ...(await res.json().catch(() => ({}))) };
   } catch {
     return { ok: false, error: "didn’t reach the server" };
@@ -1251,7 +1254,7 @@ function duelPage(id) {
   const connect = () => {
     es?.close();
     heard = started = Date.now();
-    es = new EventSource(`${base}/events?player=${encodeURIComponent(me)}`);
+    es = new EventSource(`${base}/events?player=${encodeURIComponent(me)}&key=${myKey}`);
     es.onopen = () => { clearTimeout(away); away = null; if (!$("#away").hidden) location.reload(); };  // after a real outage: reload for the deploy's new client code (voice carries over via pagehide)
     es.onerror = () => { if (view && !away) away = setTimeout(() => { $("#away").hidden = false; $("#oops").hidden = true; }, 2_000); };
     es.onmessage = (e) => { heard = Date.now(); apply(JSON.parse(e.data)); };

@@ -1,7 +1,7 @@
 import http from "node:http";
 import { readFile, writeFile, rename, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { randomBytes } from "node:crypto";
+import { randomBytes, createHash } from "node:crypto";
 import { Duel, DuelError, tally, AWAY_MS } from "./duel.js";
 import * as semantle from "./semantle.js";
 import * as vectors from "./vectors.js";
@@ -19,7 +19,7 @@ const DATA = process.env.DATA_DIR ?? new URL("../data", import.meta.url).pathnam
 await mkdir(DATA, { recursive: true });
 
 /** Live duels. Every duel is also on disk, so links outlive the process. */
-/** @type {Map<string, {duel: Duel, listeners: Set<{player:string, res:http.ServerResponse}>, scores: Map<string, any>, voice: Map<string, {muted:boolean}>}>} */
+/** @type {Map<string, {duel: Duel, listeners: Set<{player:string, key:string, res:http.ServerResponse}>, scores: Map<string, any>, voice: Map<string, {muted:boolean}>}>} */
 const rooms = new Map();
 
 const fileOf = (id) => `${DATA}/${id}.json`;
@@ -132,6 +132,18 @@ async function scoreIn(room, word) {
   return result;
 }
 
+// A player's id is public (every view shows it); their browser's private key, sent with each request, is what
+// lets it act as them. A seat keeps only the key's hash, and never shows it.
+const hashOf = (key) => createHash("sha256").update(key).digest("hex");
+
+/** Whether `key` may act as `player` in this duel. A seat (or setter) saved before keys is the first key's to claim. */
+function owns(duel, player, key) {
+  const seat = duel.players.get(player) ?? (duel.setter?.id === player ? duel.setter : null);
+  if (seat?.key) return !!key && seat.key === hashOf(key);
+  if (seat && key) { seat.key = hashOf(key); save(duel).catch(console.error); }
+  return true;
+}
+
 function newId() {
   return randomBytes(4).toString("base64url").replace(/[-_]/g, "x").slice(0, 5).toLowerCase();
 }
@@ -184,7 +196,11 @@ const LOBBY_GONE_MS = Number(process.env.LOBBY_GONE_MS ?? 45_000);
 
 function broadcast(room) {
   const now = Date.now();
-  for (const l of room.listeners) send(l.res, viewOf(room, l.player, now));
+  for (const l of room.listeners) {
+    // a stream opened as a player before their seat had a key: once it has one, that stream must hold it
+    if (!owns(room.duel, l.player, l.key)) { l.res.destroy(); continue; }  // its "close" takes it out of the room
+    send(l.res, viewOf(room, l.player, now));
+  }
 }
 
 function send(res, view) {
@@ -238,7 +254,7 @@ async function createDuel(which, room = null, { mode, word, setter, avoid, colla
   if (room) duel.room = room;
   duel.collab = !!collab;
   duel.host = String(host ?? "") || null;
-  if (pick.mode === "set") duel.setter = { id: String(setter?.id ?? ""), name: String(setter?.name ?? "").trim().slice(0, 24) || "someone" };
+  if (pick.mode === "set") duel.setter = { id: String(setter?.id ?? ""), name: String(setter?.name ?? "").trim().slice(0, 24) || "someone", key: setter?.key ? hashOf(setter.key) : undefined };
   rooms.set(id, { duel, listeners: new Set(), scores: new Map(), voice: new Map() });
   ranked(duel.puzzle.secret).catch(() => {});  // warm: for scoring, and the chart's lines once it's over
   await save(duel);
@@ -254,6 +270,7 @@ async function handle(req, res) {
   const parts = url.pathname.split("/").filter(Boolean);
 
   const read = req.method === "GET" || req.method === "HEAD";  // Node drops the body for HEAD
+  const key = String(req.headers["x-player-key"] ?? url.searchParams.get("key") ?? "");  // (an event stream can't send headers)
 
   if (read && url.pathname === "/today") return json(res, 200, { number: semantle.todaysNumber() });
 
@@ -270,7 +287,7 @@ async function handle(req, res) {
   if (req.method === "POST" && url.pathname === "/duels") {
     if (!allowNewDuel(addressOf(req))) return json(res, 429, { error: "that's a lot of new duels; try again in a minute" });
     const { puzzle: which, mode, word, player, name, avoid } = await body(req, 16_384);
-    return json(res, 200, { id: await createDuel(which, null, { mode, word, avoid, setter: { id: player, name }, host: player }) });
+    return json(res, 200, { id: await createDuel(which, null, { mode, word, avoid, setter: { id: player, name, key }, host: player }) });
   }
 
   if (parts[0] !== "d" || parts.length !== 3) return json(res, 404, { error: "not found" });
@@ -303,12 +320,13 @@ async function handle(req, res) {
 
   if (req.method === "GET" && action === "events") {
     const player = url.searchParams.get("player") ?? "";
+    if (!owns(duel, player, key)) return json(res, 403, { error: "not you" });
     // warm the top-1000 for the chart's lines; a finished round waits for it, so its first view has them
     const warm = ranked(duel.puzzle.secret).catch(() => {});
     if (duel.status(Date.now()) === "over") await warm;
     if (req.destroyed) return;  // gone while we waited: its "close" has fired, so a listener added now would never leave
     res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
-    const l = { player, res };
+    const l = { player, key, res };
     room.listeners.add(l);
     // a named event (not a comment) so the page can tell a dead stream from a quiet one
     const ping = setInterval(() => res.write("event: ping\ndata: \n\n"), 15_000);
@@ -328,6 +346,7 @@ async function handle(req, res) {
   if (req.method !== "POST") return json(res, 405, { error: "method" });
   const msg = await body(req, action === "signal" ? 32_768 : action === "rematch" ? 16_384 : 4096);  // an SDP offer runs to a few KB; a rematch carries words to avoid
   const player = String(msg.player ?? "");
+  if (!owns(duel, player, key)) return json(res, 403, { error: "not you" });
   const now = Date.now();
 
   if (action === "voice") {
@@ -357,6 +376,7 @@ async function handle(req, res) {
     duel.setPaused(player, !!msg.paused, now);
   } else if (action === "join") {
     duel.join(player, msg.name, now);
+    owns(duel, player, key);  // a new seat takes this key
   } else if (action === "leave") {
     if (duel.leave(player, now)) {
       room.voice.delete(player);  // voice is for the players
