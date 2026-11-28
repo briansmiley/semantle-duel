@@ -384,7 +384,11 @@ async function handle(req, res) {
         duel.askRematch(player, false, null, now);
         return json(res, 429, { error: "that's a lot of new duels; try again in a minute" });
       }
-      room.rematch ??= createDuel(agreed.puzzle, duel.room, { mode: agreed.mode, collab: agreed.collab, host: agreed.by, avoid: [...(agreed.avoid ?? []), duel.puzzle.secret] }).then((id) => { duel.next = id; duel.rematch = null; }).finally(() => (room.rematch = null));
+      // host: the room's original maker, not whoever proposed the rematch. If making it fails (Semantle down), the
+      // last yes is taken back for the same reason as above.
+      room.rematch ??= createDuel(agreed.puzzle, duel.room, { mode: agreed.mode, collab: agreed.collab, host: duel.host, avoid: [...(agreed.avoid ?? []), duel.puzzle.secret] })
+        .then((id) => { duel.next = id; duel.rematch = null; }, (e) => { duel.askRematch(player, false, null, now); broadcast(room); throw e; })
+        .finally(() => (room.rematch = null));
       await room.rematch;
     }
   } else if (action === "hint") {

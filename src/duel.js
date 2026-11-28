@@ -30,7 +30,7 @@ export class Duel {
     /** @type {string|null} the rematch duel, once every player has said yes to one */ this.next = null;
     /** @type {Rematch|null} a rematch someone has proposed, until it's made (or withdrawn) */ this.rematch = null;
     /** @type {{id:string, name:string}|null} whoever set the word (a "set" duel): watches, sees every word, doesn't play */ this.setter = null;
-    /** @type {string|null} who made it (or proposed this rematch): the lobby's "invited you" names them while they're seated */ this.host = null;
+    /** @type {string|null} who made the room (kept by its rematches): the lobby's "invited you" names them while they're seated */ this.host = null;
     /** the room: the first duel's id, kept by every rematch after it; its link always opens the latest round */ this.room = id;
     /** @type {Pause[]} */ this.pauses = [];
     /** @type {Record<string, number>} when each player was last heard from */ this.seen = Object.create(null);
