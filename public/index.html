@@ -80,7 +80,7 @@
   #home .open .past { margin-top: 0; }
   #home .past a { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: .8rem; padding: .35rem 0; color: var(--faint); text-decoration: none; border-bottom: 1px solid var(--rule); }
   #home .past a:hover { color: var(--ink); }
-  #home .past small { margin-left: .5rem; font-size: .75rem; opacity: .75; white-space: nowrap; }
+  #home .past small { margin-left: .5rem; font-size: .75rem; white-space: nowrap; }
   #home .past .w { color: var(--hot); }
 
   /* duel */
@@ -368,7 +368,9 @@
   #report.tight .said:not(:empty) { position: absolute; left: max(1rem, calc(env(safe-area-inset-left) + .3rem)); bottom: max(.7rem, calc(env(safe-area-inset-bottom) + .25rem)); margin: 0; padding: 0 .35em; background: var(--paper); font-size: .9rem; }
   /* ~40px tap targets for the small text controls, without moving anything: the extra hit area is an invisible band above and below */
   :is(#pausebar button, #voice button, .giveup, #share, #report h2 button, #report .acts button, li.heads .sortby) { position: relative; }
-  :is(#pausebar button, #voice button, .giveup, #share, #report h2 button, #report .acts button, li.heads .sortby)::after { content: ""; position: absolute; inset: -8px 0; }
+  :is(#pausebar button, #voice button, .giveup, #share, #report h2 button, #report .acts button, li.heads .sortby)::after { content: ""; position: absolute; inset: var(--band, -8px) 0; }
+  .giveup { --band: -11px; }
+  li.heads .sortby { --band: -10px; }
   li.heads span:first-child .sortby { min-width: 2em; }
 </style>
 </head>
@@ -603,7 +605,7 @@ async function rematch(id, puzzle, button, mode, collab) {
 
 async function newDuel(puzzle, button, extra = {}) {
   button.disabled = true;
-  const r = await post("/duels", { puzzle, ...extra });
+  const r = await post("/duels", { puzzle, player: me, ...extra });  // who made it: the invite line names them
   if (r.id) location.href = `/d/${r.id}`;
   else { button.disabled = false; oops(r.error); }
 }
@@ -1075,7 +1077,7 @@ else {
     const word = $("#setword [name=word]").value.trim(), name = $("#setword [name=name]").value.trim();
     if (!word) return;
     if (name) store.set("sd-name", name);
-    newDuel(undefined, $("#setword button"), { word, player: me, name });
+    newDuel(undefined, $("#setword button"), { word, name });
   };
 }
 
@@ -1096,11 +1098,16 @@ async function archivePage() {
   // attached before /today answers, so an early submit waits for it rather than natively reloading the page
   $("#archive .goto").onsubmit = async (e) => {
     e.preventDefault();
-    const today = await todayP;
+    const b = $("#archive .goto button"), why = $("#archive .goto .why");
+    if (b.disabled) return;  // a submit is already waiting on /today, or the duel is starting
+    b.disabled = true;
+    let today;
+    try { today = await todayP; }
+    catch { why.textContent = "couldn’t load the archive, try again"; b.disabled = false; return; }
     const n = Number($("#archive .goto input").value);
     const ok = Number.isInteger(n) && n >= 1 && n <= today;
-    $("#archive .goto .why").textContent = ok ? "" : `pick a number from 1 to ${today}`;
-    if (ok) open(n, $("#archive .goto button"));
+    why.textContent = ok ? "" : `pick a number from 1 to ${today}`;
+    if (ok) open(n, b); else b.disabled = false;
   };
   // back to a page restored from the back/forward cache: the go button was left disabled by the pick that left it
   addEventListener("pageshow", (e) => { if (e.persisted) $("#archive .goto button").disabled = false; });
@@ -1225,12 +1232,18 @@ function duelPage(id) {
     const mine = view?.players.find((p) => p.id === me);
     if (mine) post(`${base}/ready`, { player: me, ready: !mine.ready }).then(act);
   };
+  const shares = () => navigator.share && matchMedia("(hover: none)").matches;
+  const shareLabel = () => { const b = $("#share"); b.textContent = b.title = shares() ? "invite" : "copy link"; };
+  shareLabel();
   $("#share").onclick = async () => {
     const link = `${location.origin}/d/${view?.room ?? id}`;  // the room's link, whichever round this is
-    if (navigator.share && matchMedia("(hover: none)").matches) return navigator.share({ url: link }).catch(() => {});  // phones: the share sheet beats pasting
+    if (shares()) {  // phones: the share sheet beats pasting
+      try { return await navigator.share({ url: link }); }
+      catch (e) { if (e.name === "AbortError") return; }  // closed the sheet; anything else falls through to copying
+    }
     try { await navigator.clipboard.writeText(link); $("#share").textContent = "copied"; }
     catch { $("#share").textContent = link; }
-    setTimeout(() => ($("#share").textContent = "copy link"), 1600);
+    setTimeout(shareLabel, 1600);
   };
 
   // Live updates. Phones drop these streams silently (sleep, network switch), so the
@@ -1395,9 +1408,8 @@ function duelPage(id) {
       go.textContent = mine?.ready ? "unready" : "ready";
       const unready = v.players.filter((p) => !p.ready && p.id !== me).map((p) => p.name);
       // who asked you here and to what, until you've named yourself; and what a setter does
-      // (the first seated, who made it, unless that's you; "player" is an unnamed seat, not a name to show)
-      const first = v.players[0];
-      const host = v.setter ?? (first && first.id !== me && first.name !== "player" ? first : null);
+      // (who made it, while they're seated and aren't you; "player" is an unnamed seat, not a name to show)
+      const host = v.setter ?? (v.host && !v.host.you && v.host.name !== "player" ? v.host : null);
       const what = v.mode === "random" ? "a random word" : v.mode === "set" ? "their word"
         : v.number === today ? "today’s Semantle word" : `Semantle #${v.number}`;
       const intro = setting ? "send the link; you’ll watch every guess."

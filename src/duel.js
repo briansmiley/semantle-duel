@@ -30,9 +30,10 @@ export class Duel {
     /** @type {string|null} the rematch duel, once every player has said yes to one */ this.next = null;
     /** @type {Rematch|null} a rematch someone has proposed, until it's made (or withdrawn) */ this.rematch = null;
     /** @type {{id:string, name:string, key?:string}|null} whoever set the word (a "set" duel): watches, sees every word, doesn't play; key: the hash of their browser's private key */ this.setter = null;
+    /** @type {string|null} who made the room (kept by its rematches): the lobby's "invited you" names them while they're seated */ this.host = null;
     /** the room: the first duel's id, kept by every rematch after it; its link always opens the latest round */ this.room = id;
     /** @type {Pause[]} */ this.pauses = [];
-    /** @type {Record<string, number>} when each player was last heard from */ this.seen = {};
+    /** @type {Record<string, number>} when each player was last heard from */ this.seen = Object.create(null);
     /** @type {string[]} players asking for a hint; given once everyone still racing has asked */ this.hintAsks = [];
     /** how this round is played, whatever the word's source (puzzle.mode): racing, or the room together */ this.collab = false;
     /** @type {string[]} co-op: players asking to give up; the round ends once everyone still racing has asked */ this.giveUpAsks = [];
@@ -319,12 +320,14 @@ export class Duel {
     const ended = status === "over" ? this.endedAt() : now;
     const open = this.pause();
     const mine = new Set(viewer?.guesses.map((g) => g.word));
+    const host = this.players.get(this.host);
     return {
       id: this.id,
       number: this.puzzle.number,
       mode: this.puzzle.mode ?? "semantle",
       collab: this.collab,
       setter: this.setter && { name: this.setter.name, you: this.setter.id === viewerId },  // never their id: it would open their view
+      host: host ? { name: host.name, you: host.id === viewerId } : null,  // only while seated
       status,
       now,
       startsAt: this.startsAt,
@@ -362,7 +365,7 @@ export class Duel {
   }
 
   toJSON() {
-    return { id: this.id, puzzle: this.puzzle, players: [...this.players.values()], startsAt: this.startsAt, createdAt: this.createdAt, next: this.next, rematch: this.rematch, room: this.room, setter: this.setter, pauses: this.pauses, seen: this.seen, hintAsks: this.hintAsks, collab: this.collab, giveUpAsks: this.giveUpAsks };
+    return { id: this.id, puzzle: this.puzzle, players: [...this.players.values()], startsAt: this.startsAt, createdAt: this.createdAt, next: this.next, rematch: this.rematch, room: this.room, setter: this.setter, host: this.host, pauses: this.pauses, seen: this.seen, hintAsks: this.hintAsks, collab: this.collab, giveUpAsks: this.giveUpAsks };
   }
 
   static fromJSON(o) {
@@ -373,8 +376,9 @@ export class Duel {
     d.rematch = o.rematch ?? null;
     d.room = o.room ?? o.id;
     d.setter = o.setter ?? null;
+    d.host = o.host ?? null;
     d.pauses = o.pauses ?? [];
-    d.seen = o.seen ?? {};
+    d.seen = Object.assign(Object.create(null), o.seen);  // prototype-less: a duel saved before ids were checked may have a "__proto__" player
     d.hintAsks = o.hintAsks ?? [];
     d.collab = !!o.collab;
     d.giveUpAsks = o.giveUpAsks ?? [];
